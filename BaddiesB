@@ -1,1 +1,1042 @@
-.
+-- KIll4RS Script Hub v3.2
+
+local Players          = game:GetService("Players")
+local TweenService     = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService       = game:GetService("RunService")
+local LocalPlayer      = Players.LocalPlayer
+
+local PREMIUM_IDS = {
+    [2442228339]  = true,
+    [8697563940]  = true,
+    [11007264911] = true,
+    [11147001147] = true,
+    [4682177026]  = true,
+    [1902737653]  = true,
+    [10487575296] = true,
+}
+local isPremium = PREMIUM_IDS[LocalPlayer.UserId] == true
+
+local function getSafeGui()
+    if gethui then return gethui() end
+    return game:GetService("CoreGui")
+end
+
+for _,v in pairs(getSafeGui():GetChildren()) do
+    if v.Name=="KIll4RS_Loader" or v.Name=="KIll4RS_Hub" or v.Name=="KIll4RS_Notifs" then v:Destroy() end
+end
+
+local loaderGui = Instance.new("ScreenGui")
+loaderGui.Name="KIll4RS_Loader"; loaderGui.ResetOnSpawn=false
+if protect_gui then protect_gui(loaderGui) end
+loaderGui.Parent=getSafeGui()
+
+local loaderMain=Instance.new("Frame")
+loaderMain.Size=UDim2.new(0,320,0,140); loaderMain.Position=UDim2.new(0.5,-160,0.5,-70)
+loaderMain.BackgroundColor3=Color3.fromRGB(12,12,18); loaderMain.BorderSizePixel=0; loaderMain.Parent=loaderGui
+Instance.new("UICorner",loaderMain).CornerRadius=UDim.new(0,10)
+local loaderStroke=Instance.new("UIStroke",loaderMain); loaderStroke.Color=Color3.fromRGB(130,60,220); loaderStroke.Thickness=1.5
+
+local titleLbl=Instance.new("TextLabel")
+titleLbl.Size=UDim2.new(1,0,0,40); titleLbl.Position=UDim2.new(0,0,0,15); titleLbl.BackgroundTransparency=1
+titleLbl.Text="KIll4RS SCRIPT HUB"; titleLbl.Font=Enum.Font.GothamBold; titleLbl.TextSize=16
+titleLbl.TextColor3=Color3.fromRGB(240,240,255); titleLbl.Parent=loaderMain
+
+local statusLbl=Instance.new("TextLabel")
+statusLbl.Size=UDim2.new(1,0,0,20); statusLbl.Position=UDim2.new(0,0,0,55); statusLbl.BackgroundTransparency=1
+statusLbl.Text="Checking whitelist..."; statusLbl.Font=Enum.Font.GothamMedium; statusLbl.TextSize=12
+statusLbl.TextColor3=Color3.fromRGB(150,150,180); statusLbl.Parent=loaderMain
+
+local barBg=Instance.new("Frame")
+barBg.Size=UDim2.new(0,260,0,6); barBg.Position=UDim2.new(0.5,-130,0,95)
+barBg.BackgroundColor3=Color3.fromRGB(30,30,45); barBg.BorderSizePixel=0; barBg.Parent=loaderMain
+Instance.new("UICorner",barBg).CornerRadius=UDim.new(1,0)
+
+local progBar=Instance.new("Frame")
+progBar.Size=UDim2.new(0,0,1,0); progBar.BackgroundColor3=Color3.fromRGB(130,60,220); progBar.BorderSizePixel=0; progBar.Parent=barBg
+Instance.new("UICorner",progBar).CornerRadius=UDim.new(1,0)
+
+local function playLoadSound()
+    local s=Instance.new("Sound"); s.SoundId="rbxassetid://9114223194"; s.Volume=0.5
+    s.Parent=game:GetService("SoundService"); s:Play(); game:GetService("Debris"):AddItem(s,2)
+end
+
+local function runLoader()
+    task.wait(0.5)
+    statusLbl.Text="Stripping & patching modules..."
+    TweenService:Create(progBar,TweenInfo.new(0.8,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Size=UDim2.new(0.4,0,1,0)}):Play()
+    task.wait(0.9)
+    statusLbl.Text="Verifying client rank..."
+    TweenService:Create(progBar,TweenInfo.new(0.6,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Size=UDim2.new(0.7,0,1,0)}):Play()
+    task.wait(0.7)
+    statusLbl.Text=isPremium and "Welcome, Premium User!" or "Welcome, Free User!"
+    if isPremium then statusLbl.TextColor3=Color3.fromRGB(100,220,130) end
+    TweenService:Create(progBar,TweenInfo.new(0.5,Enum.EasingStyle.Linear),{Size=UDim2.new(1,0,1,0)}):Play()
+    task.wait(0.6)
+    for _,o in pairs({loaderMain,barBg,progBar}) do TweenService:Create(o,TweenInfo.new(0.3),{BackgroundTransparency=1}):Play() end
+    TweenService:Create(titleLbl,TweenInfo.new(0.3),{TextTransparency=1}):Play()
+    TweenService:Create(statusLbl,TweenInfo.new(0.3),{TextTransparency=1}):Play()
+    loaderStroke:Destroy(); task.wait(0.35); loaderGui:Destroy()
+    playLoadSound(); initializeHub()
+end
+
+function initializeHub()
+    local ok0,VIM_SERVICE=pcall(function() return game:GetService("VirtualInputManager") end)
+    if not ok0 then VIM_SERVICE=nil end
+
+    local Theme={
+        Background=Color3.fromRGB(12,12,18),TopBar=Color3.fromRGB(20,20,30),
+        TabBar=Color3.fromRGB(16,16,24),TabActive=Color3.fromRGB(130,60,220),
+        TabInactive=Color3.fromRGB(30,30,45),Element=Color3.fromRGB(22,22,34),
+        ElementHover=Color3.fromRGB(35,35,55),Accent=Color3.fromRGB(130,60,220),
+        Text=Color3.fromRGB(240,240,255),SubText=Color3.fromRGB(150,150,180),
+        Toggle_On=Color3.fromRGB(100,220,130),Toggle_Off=Color3.fromRGB(60,60,80),
+        Slider_Fill=Color3.fromRGB(130,60,220),Border=Color3.fromRGB(50,50,75),
+        Notify_BG=Color3.fromRGB(18,18,28),
+    }
+    local Font=Enum.Font.GothamMedium; local FontBold=Enum.Font.GothamBold
+
+    local function create(class,props,parent)
+        local o=Instance.new(class); for k,v in pairs(props) do o[k]=v end; if parent then o.Parent=parent end; return o
+    end
+    local function tw(o,i,p) TweenService:Create(o,i,p):Play() end
+
+    local function makeDraggable(frame,handle)
+        local drag,dInput,dStart,sPos
+        handle.InputBegan:Connect(function(i)
+            if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+                drag=true; dStart=i.Position; sPos=frame.Position
+                i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then drag=false end end)
+            end
+        end)
+        handle.InputChanged:Connect(function(i)
+            if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then dInput=i end
+        end)
+        UserInputService.InputChanged:Connect(function(i)
+            if i==dInput and drag then
+                local d=i.Position-dStart
+                frame.Position=UDim2.new(sPos.X.Scale,sPos.X.Offset+d.X,sPos.Y.Scale,sPos.Y.Offset+d.Y)
+            end
+        end)
+    end
+
+    local notifyHolder
+    do
+        local sg=create("ScreenGui",{Name="KIll4RS_Notifs",ResetOnSpawn=false,ZIndexBehavior=Enum.ZIndexBehavior.Sibling})
+        if protect_gui then protect_gui(sg) end; sg.Parent=getSafeGui()
+        notifyHolder=create("Frame",{Size=UDim2.new(0,280,1,0),Position=UDim2.new(1,-290,0,0),BackgroundTransparency=1},sg)
+        create("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,VerticalAlignment=Enum.VerticalAlignment.Bottom,Padding=UDim.new(0,8)},notifyHolder)
+        create("UIPadding",{PaddingBottom=UDim.new(0,12)},notifyHolder)
+    end
+
+    local function Notify(opts)
+        local title=opts.Title or "Notice"; local content=opts.Content or ""; local dur=opts.Duration or 3
+        local card=create("Frame",{Size=UDim2.new(1,0,0,70),BackgroundColor3=Theme.Notify_BG,BorderSizePixel=0,ClipsDescendants=true},notifyHolder)
+        create("UICorner",{CornerRadius=UDim.new(0,8)},card); create("UIStroke",{Color=Theme.Accent,Thickness=1.5},card)
+        create("Frame",{Size=UDim2.new(0,3,1,0),BackgroundColor3=Theme.Accent,BorderSizePixel=0},card)
+        create("TextLabel",{Text=title,Font=FontBold,TextSize=13,TextColor3=Theme.Text,BackgroundTransparency=1,Size=UDim2.new(1,-16,0,20),Position=UDim2.new(0,12,0,8),TextXAlignment=Enum.TextXAlignment.Left},card)
+        create("TextLabel",{Text=content,Font=Font,TextSize=11,TextColor3=Theme.SubText,BackgroundTransparency=1,Size=UDim2.new(1,-16,0,32),Position=UDim2.new(0,12,0,28),TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true},card)
+        local bar=create("Frame",{Size=UDim2.new(1,0,0,2),Position=UDim2.new(0,0,1,-2),BackgroundColor3=Theme.Accent,BorderSizePixel=0},card)
+        tw(bar,TweenInfo.new(dur,Enum.EasingStyle.Linear),{Size=UDim2.new(0,0,0,2)})
+        task.delay(dur,function() tw(card,TweenInfo.new(0.3,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{BackgroundTransparency=1}); task.wait(0.3); card:Destroy() end)
+    end
+
+    local function CreateWindow(opts)
+        local sg=create("ScreenGui",{Name="KIll4RS_Hub",ResetOnSpawn=false,ZIndexBehavior=Enum.ZIndexBehavior.Sibling})
+        if protect_gui then protect_gui(sg) end; sg.Parent=getSafeGui()
+        local Main=create("Frame",{Size=UDim2.new(0,620,0,420),Position=UDim2.new(0.5,-310,0.5,-210),BackgroundColor3=Theme.Background,BorderSizePixel=0},sg)
+        create("UICorner",{CornerRadius=UDim.new(0,10)},Main); create("UIStroke",{Color=Theme.Border,Thickness=1.2},Main)
+        local TopBar=create("Frame",{Size=UDim2.new(1,0,0,38),BackgroundColor3=Theme.TopBar,BorderSizePixel=0},Main)
+        create("UICorner",{CornerRadius=UDim.new(0,10)},TopBar)
+        create("Frame",{Size=UDim2.new(1,0,0.5,0),Position=UDim2.new(0,0,0.5,0),BackgroundColor3=Theme.TopBar,BorderSizePixel=0},TopBar)
+        create("TextLabel",{Text=opts.Name or "Hub",Font=FontBold,TextSize=14,TextColor3=Theme.Text,BackgroundTransparency=1,Size=UDim2.new(1,-80,1,0),Position=UDim2.new(0,14,0,0),TextXAlignment=Enum.TextXAlignment.Left},TopBar)
+        local closeBtn=create("TextButton",{Text="X",Font=FontBold,TextSize=13,TextColor3=Theme.SubText,BackgroundTransparency=1,Size=UDim2.new(0,36,1,0),Position=UDim2.new(1,-36,0,0)},TopBar)
+        closeBtn.MouseButton1Click:Connect(function() sg:Destroy() end)
+        closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3=Color3.fromRGB(255,80,80) end)
+        closeBtn.MouseLeave:Connect(function() closeBtn.TextColor3=Theme.SubText end)
+        local minBtn=create("TextButton",{Text="-",Font=FontBold,TextSize=16,TextColor3=Theme.SubText,BackgroundTransparency=1,Size=UDim2.new(0,36,1,0),Position=UDim2.new(1,-72,0,0)},TopBar)
+        local ContentArea=create("Frame",{Size=UDim2.new(1,0,1,-38),Position=UDim2.new(0,0,0,38),BackgroundTransparency=1,ClipsDescendants=true},Main)
+        local minimized=false
+        minBtn.MouseButton1Click:Connect(function()
+            minimized=not minimized
+            tw(Main,TweenInfo.new(0.25,Enum.EasingStyle.Quad),{Size=minimized and UDim2.new(0,620,0,38) or UDim2.new(0,620,0,420)})
+        end)
+        makeDraggable(Main,TopBar)
+        UserInputService.InputBegan:Connect(function(input,gp)
+            if gp then return end
+            if input.KeyCode==Enum.KeyCode.RightShift then Main.Visible=not Main.Visible end
+        end)
+        local TabBar=create("Frame",{Size=UDim2.new(0,135,1,0),BackgroundColor3=Theme.TabBar,BorderSizePixel=0},ContentArea)
+        create("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2)},TabBar)
+        create("UIPadding",{PaddingTop=UDim.new(0,8),PaddingLeft=UDim.new(0,6),PaddingRight=UDim.new(0,6)},TabBar)
+        local ContentPanel=create("Frame",{Size=UDim2.new(1,-135,1,0),Position=UDim2.new(0,135,0,0),BackgroundColor3=Theme.Background,BorderSizePixel=0,ClipsDescendants=true},ContentArea)
+        local Window={_tabs={}}
+        function Window:Notify(o) Notify(o) end
+        function Window:CreateTab(name,isPremiumLocked)
+            local tabBtn=create("TextButton",{Text=name,Font=Font,TextSize=11,TextColor3=Theme.SubText,BackgroundColor3=Theme.TabInactive,Size=UDim2.new(1,0,0,30),AutoButtonColor=false,TextXAlignment=Enum.TextXAlignment.Left},TabBar)
+            create("UICorner",{CornerRadius=UDim.new(0,6)},tabBtn); create("UIPadding",{PaddingLeft=UDim.new(0,10)},tabBtn)
+            local sf=create("ScrollingFrame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,ScrollBarThickness=4,ScrollBarImageColor3=Theme.Accent,BorderSizePixel=0,Visible=false,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollingEnabled=true},ContentPanel)
+            create("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,4)},sf)
+            create("UIPadding",{PaddingTop=UDim.new(0,8),PaddingLeft=UDim.new(0,10),PaddingRight=UDim.new(0,14),PaddingBottom=UDim.new(0,8)},sf)
+            local Tab={_frame=sf,_btn=tabBtn}
+            tabBtn.MouseButton1Click:Connect(function()
+                for _,t in pairs(Window._tabs) do t._frame.Visible=false; tw(t._btn,TweenInfo.new(0.15),{BackgroundColor3=Theme.TabInactive,TextColor3=Theme.SubText}) end
+                sf.Visible=true; tw(tabBtn,TweenInfo.new(0.15),{BackgroundColor3=Theme.TabActive,TextColor3=Theme.Text})
+            end)
+            table.insert(Window._tabs,Tab)
+            if #Window._tabs==1 then sf.Visible=true; tabBtn.BackgroundColor3=Theme.TabActive; tabBtn.TextColor3=Theme.Text end
+            local accessBlocked=isPremiumLocked and not isPremium
+            if accessBlocked then
+                local lb=create("Frame",{Size=UDim2.new(1,0,0,75),BackgroundColor3=Color3.fromRGB(24,16,34),BorderSizePixel=0},sf)
+                create("UICorner",{CornerRadius=UDim.new(0,8)},lb); create("UIStroke",{Color=Theme.Accent,Thickness=1.2},lb)
+                create("TextLabel",{Text="PREMIUM ACCESS REQUIRED",Font=FontBold,TextSize=13,TextColor3=Theme.Accent,BackgroundTransparency=1,Size=UDim2.new(1,-24,0,25),Position=UDim2.new(0,12,0,10),TextXAlignment=Enum.TextXAlignment.Left},lb)
+                create("TextLabel",{Text="This panel is restricted to whitelisted premium clients.",Font=Font,TextSize=11,TextColor3=Theme.SubText,BackgroundTransparency=1,Size=UDim2.new(1,-24,0,30),Position=UDim2.new(0,12,0,38),TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true},lb)
+            end
+            function Tab:CreateSection(title)
+                if accessBlocked then return end
+                local sec=create("Frame",{Size=UDim2.new(1,0,0,24),BackgroundTransparency=1},sf)
+                create("TextLabel",{Text=title:upper(),Font=FontBold,TextSize=10,TextColor3=Theme.Accent,BackgroundTransparency=1,Size=UDim2.new(1,0,0,14),Position=UDim2.new(0,0,0,5),TextXAlignment=Enum.TextXAlignment.Left},sec)
+                create("Frame",{Size=UDim2.new(1,0,0,1),Position=UDim2.new(0,0,1,-1),BackgroundColor3=Theme.Border,BorderSizePixel=0},sec)
+            end
+            function Tab:CreateToggle(o)
+                if accessBlocked then return end
+                local val=o.CurrentValue or false; local cb=o.Callback or function()end
+                local row=create("Frame",{Size=UDim2.new(1,0,0,36),BackgroundColor3=Theme.Element,BorderSizePixel=0},sf)
+                create("UICorner",{CornerRadius=UDim.new(0,7)},row)
+                create("TextLabel",{Text=o.Name or "Toggle",Font=Font,TextSize=13,TextColor3=Theme.Text,BackgroundTransparency=1,Size=UDim2.new(1,-60,1,0),Position=UDim2.new(0,12,0,0),TextXAlignment=Enum.TextXAlignment.Left},row)
+                local track=create("Frame",{Size=UDim2.new(0,36,0,18),Position=UDim2.new(1,-48,0.5,-9),BackgroundColor3=val and Theme.Toggle_On or Theme.Toggle_Off,BorderSizePixel=0},row)
+                create("UICorner",{CornerRadius=UDim.new(1,0)},track)
+                local knob=create("Frame",{Size=UDim2.new(0,14,0,14),Position=val and UDim2.new(1,-16,0.5,-7) or UDim2.new(0,2,0.5,-7),BackgroundColor3=Theme.Text,BorderSizePixel=0},track)
+                create("UICorner",{CornerRadius=UDim.new(1,0)},knob)
+                local btn=create("TextButton",{Text="",BackgroundTransparency=1,Size=UDim2.new(1,0,1,0)},row)
+                btn.MouseButton1Click:Connect(function()
+                    val=not val
+                    tw(track,TweenInfo.new(0.2),{BackgroundColor3=val and Theme.Toggle_On or Theme.Toggle_Off})
+                    tw(knob,TweenInfo.new(0.2),{Position=val and UDim2.new(1,-16,0.5,-7) or UDim2.new(0,2,0.5,-7)})
+                    cb(val)
+                end)
+                btn.MouseEnter:Connect(function() tw(row,TweenInfo.new(0.1),{BackgroundColor3=Theme.ElementHover}) end)
+                btn.MouseLeave:Connect(function() tw(row,TweenInfo.new(0.1),{BackgroundColor3=Theme.Element}) end)
+            end
+            function Tab:CreateSlider(o)
+                if accessBlocked then return end
+                local range=o.Range or {0,100}; local inc=o.Increment or 1; local suffix=o.Suffix or ""; local current=o.CurrentValue or range[1]; local cb=o.Callback or function()end
+                local row=create("Frame",{Size=UDim2.new(1,0,0,50),BackgroundColor3=Theme.Element,BorderSizePixel=0},sf)
+                create("UICorner",{CornerRadius=UDim.new(0,7)},row)
+                create("TextLabel",{Text=o.Name or "Slider",Font=Font,TextSize=13,TextColor3=Theme.Text,BackgroundTransparency=1,Size=UDim2.new(0.6,0,0,20),Position=UDim2.new(0,12,0,6),TextXAlignment=Enum.TextXAlignment.Left},row)
+                local vl=create("TextLabel",{Text=tostring(current)..suffix,Font=FontBold,TextSize=12,TextColor3=Theme.Accent,BackgroundTransparency=1,Size=UDim2.new(0.4,-12,0,20),Position=UDim2.new(0.6,0,0,6),TextXAlignment=Enum.TextXAlignment.Right},row)
+                local track=create("Frame",{Size=UDim2.new(1,-24,0,6),Position=UDim2.new(0,12,0,32),BackgroundColor3=Theme.TabInactive,BorderSizePixel=0},row)
+                create("UICorner",{CornerRadius=UDim.new(1,0)},track)
+                local fill=create("Frame",{Size=UDim2.new((current-range[1])/(range[2]-range[1]),0,1,0),BackgroundColor3=Theme.Slider_Fill,BorderSizePixel=0},track)
+                create("UICorner",{CornerRadius=UDim.new(1,0)},fill)
+                local thumb=create("Frame",{Size=UDim2.new(0,20,0,20),Position=UDim2.new((current-range[1])/(range[2]-range[1]),-10,0.5,-10),BackgroundColor3=Theme.Accent,BorderSizePixel=0},track)
+                create("UICorner",{CornerRadius=UDim.new(1,0)},thumb)
+                local dragging=false
+                local function updateFromX(absX)
+                    local pct=math.clamp((absX-track.AbsolutePosition.X)/track.AbsoluteSize.X,0,1)
+                    local val=math.clamp(math.round((range[1]+(range[2]-range[1])*pct)/inc)*inc,range[1],range[2])
+                    local fp=(val-range[1])/(range[2]-range[1])
+                    tw(fill,TweenInfo.new(0.08,Enum.EasingStyle.Quad),{Size=UDim2.new(fp,0,1,0)})
+                    tw(thumb,TweenInfo.new(0.08,Enum.EasingStyle.Quad),{Position=UDim2.new(fp,-10,0.5,-10)})
+                    vl.Text=tostring(val)..suffix; cb(val)
+                end
+                local function startDrag(i)
+                    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=true; updateFromX(i.Position.X) end
+                end
+                track.InputBegan:Connect(startDrag); thumb.InputBegan:Connect(startDrag)
+                UserInputService.InputChanged:Connect(function(i) if dragging and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then updateFromX(i.Position.X) end end)
+                UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
+            end
+            function Tab:CreateButton(o)
+                if accessBlocked then return end
+                local cb=o.Callback or function()end
+                local btn=create("TextButton",{Text=o.Name or "Button",Font=Font,TextSize=13,TextColor3=Theme.Text,BackgroundColor3=Theme.Element,Size=UDim2.new(1,0,0,36),BorderSizePixel=0,AutoButtonColor=false},sf)
+                create("UICorner",{CornerRadius=UDim.new(0,7)},btn); create("UIStroke",{Color=Theme.Border,Thickness=1},btn)
+                btn.MouseEnter:Connect(function() tw(btn,TweenInfo.new(0.1),{BackgroundColor3=Theme.ElementHover}) end)
+                btn.MouseLeave:Connect(function() tw(btn,TweenInfo.new(0.1),{BackgroundColor3=Theme.Element}) end)
+                btn.MouseButton1Click:Connect(function()
+                    tw(btn,TweenInfo.new(0.05),{BackgroundColor3=Theme.Accent})
+                    task.delay(0.15,function() tw(btn,TweenInfo.new(0.1),{BackgroundColor3=Theme.Element}) end)
+                    cb()
+                end)
+            end
+            function Tab:CreateParagraph(o)
+                if accessBlocked then return end
+                local box=create("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundColor3=Theme.Element,BorderSizePixel=0},sf)
+                create("UICorner",{CornerRadius=UDim.new(0,7)},box)
+                create("UIPadding",{PaddingTop=UDim.new(0,8),PaddingBottom=UDim.new(0,8),PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,12)},box)
+                create("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,4)},box)
+                create("TextLabel",{Text=o.Title or "",Font=FontBold,TextSize=13,TextColor3=Theme.Text,BackgroundTransparency=1,Size=UDim2.new(1,0,0,18),TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=0},box)
+                create("TextLabel",{Text=o.Content or "",Font=Font,TextSize=12,TextColor3=Theme.SubText,BackgroundTransparency=1,Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true,LayoutOrder=1},box)
+            end
+            return Tab
+        end
+        return Window
+    end
+
+    local RS=game:GetService("ReplicatedStorage")
+    local gameId=game.PlaceId
+    local games={[11158043705]="Baddies",[121092926448934]="Baddies",[84780374286597]="Baddies"}
+    local currentGame=games[gameId]
+    if not currentGame then Notify({Title="Unknown Game",Content="PlaceId "..tostring(gameId).." not supported.",Duration=6}); return end
+
+    local Window=CreateWindow({Name="KIll4RS Script Hub"})
+
+    -- ============================================================
+    -- AUTOBUY MODULE (v5 â€” Replion-based, silent, fast)
+    -- ============================================================
+    local ITEM_PRICES={
+        ["Axe"]=70,["Blast Bow"]=6000,["Brass Knuckles"]=4400,["Bunny Shoes"]=3500,["Cannon"]=1900,
+        ["Chakram"]=400,["Champion Gloves"]=1900,["Cupids Bow"]=10000,["Dance Bomb"]=1700,
+        ["Dog Purse"]=4200,["Freeze Gun"]=4250,["Ghostly Gloves"]=100000,["Glitter Blue Spray"]=40000,
+        ["Glitter Bomb"]=100000,["Golden Snowball Launcher"]=670,["Grapple Hook"]=5500,["Gravity Gun"]=25000,
+        ["Grenade Launcher"]=40000,["Grim Reaper Cloak"]=10000,["Harpoon"]=650,["Ice Crown Queen"]=38000,
+        ["Ice Katana"]=40000,["Inferno Blade"]=3500,["Katana & Kunai Set"]=300,["Kitty Purse"]=2500,
+        ["Love Me Hate Me Taser"]=36000,["Loveboard"]=9200,["Medic Spray"]=24000,["Poison Knuckles"]=1250,
+        ["Rainbow Portal Gun"]=4000,["Reindeer Purse"]=1400,["RiotShield"]=2000,["Roller Skates"]=400,
+        ["Sakura Blade"]=3300,["Sakura Sword and Shield Set"]=7000,["Santa's Naughty or Nice Launcher"]=60000,
+        ["Scythe"]=63000,["Slasher Claws"]=1500,["Snowball Launcher"]=400,["Spiked Kitty Stanli"]=15500,
+        ["Spiked Knuckles"]=45000,["Spiked Nightmare Purse"]=9000,["SpikedPurse"]=400,["Tidal Fist"]=700,
+        ["Trashbin Disguise"]=3500,["Trident"]=25000,["TurkeySkewers"]=800,["Twin Blade"]=2500,
+        ["Vine Bomb"]=1500,["Water Fan"]=4500,["Wingblades"]=13000,["Witch Scepter"]=900,
+        ["Yin Yang Knives"]=1900,["Chain Mace"]=100,["Chainsaw"]=1000,["Fan of Requiem"]=1000,
+        ["Nunchucks"]=900,["Regular Bow"]=250,["Shiny Purse"]=100,["Sledgehammer"]=1220,
+        ["Sledge Hammer"]=1220,["Stick"]=1,["Poison Ivy Spray"]=100,["Black Flame Stomp"]=7000,
+        ["Black Flame Knuckles"]=1000,["Bamboo Dual Sakura Blade"]=5500,["Fantasy Style"]=1900,
+        ["Fantasy Sakura Blade"]=5000,["Angel Style"]=3000,["Glitter Style"]=1900,["Beast Style"]=3000,
+        ["Heartbreaker Style"]=70000,["Princess Power Style"]=2500,["Goth Style"]=2900,
+        ["Surf's Up Hoverboard"]=7000,["Popstar Hoverboard"]=4000,["Pink Star Board"]=4000,
+        ["Credit Card Hoverboard"]=4000,["Air Strike Finisher"]=6000,["Food Fight Finisher"]=6000,
+        ["Vampire Finisher"]=1500,["Crushing Love Stomp"]=4900,["Fast Food Stomp"]=200,
+    }
+
+    local autoBuyActive=true; local autoBoughtCount=0; local autoBoughtSpent=0
+    local inFlight={}
+
+    local _abPurchase=RS.Modules.Net:FindFirstChild("RF/Trading/PurchaseSaleListing",true)
+    local _abReplion=require(RS.Modules.Replion)
+    local _abSaleListings=_abReplion.Client:WaitReplion("SaleListings")
+
+    local function _abGetName(d)
+        local n=""
+        if type(d)=="table" and d.Item then pcall(function() n=tostring(d.Item.Name) end) end
+        return n
+    end
+
+    local function _abTryBuy(owner,uuid,listing)
+        if inFlight[uuid] then return end
+        inFlight[uuid]=true
+        task.spawn(function()
+            local ok,res=pcall(function() return _abPurchase:InvokeServer(owner,"Sign",uuid) end)
+            if ok and res~=false then
+                autoBoughtCount=autoBoughtCount+1
+                autoBoughtSpent=autoBoughtSpent+(tonumber(listing.Price or 0) or 0)
+            end
+            inFlight[uuid]=nil
+        end)
+    end
+
+    local function _abScanAll()
+        if not _abPurchase or not _abSaleListings then return end
+        local all=_abSaleListings:Get({"Players"})
+        if type(all)~="table" then return end
+        for uid,pd in pairs(all) do
+            if not autoBuyActive then break end
+            local sign=pd and pd.Sign
+            if type(sign)~="table" then continue end
+            local userId=tonumber(uid)
+            local owner=userId and Players:GetPlayerByUserId(userId)
+            if not owner or owner==LocalPlayer then continue end
+            for uuid,listing in pairs(sign) do
+                if type(listing)~="table" or inFlight[uuid] then continue end
+                local name=_abGetName(listing)
+                local price=tonumber(listing.Price or 0) or 0
+                local maxVal=ITEM_PRICES[name]
+                if maxVal and price<=maxVal then _abTryBuy(owner,uuid,listing) end
+            end
+        end
+    end
+
+    if _abSaleListings then
+        _abSaleListings:OnDescendantChange({"Players"},function(path,newVal,oldVal)
+            if not autoBuyActive or not newVal or oldVal then return end
+            if #path>=4 and path[3]=="Sign" and type(newVal)=="table" then
+                local uuid=path[4]
+                local name=""
+                if newVal.Item then pcall(function() name=tostring(newVal.Item.Name) end) end
+                local price=tonumber(newVal.Price or 0) or 0
+                local maxVal=ITEM_PRICES[name]
+                if maxVal and price<=maxVal then
+                    local userId=tonumber(path[2])
+                    local owner=userId and Players:GetPlayerByUserId(userId)
+                    if owner and owner~=LocalPlayer then _abTryBuy(owner,uuid,newVal) end
+                end
+            end
+        end)
+    end
+
+    Players.PlayerAdded:Connect(function()
+        if not autoBuyActive then return end
+        task.wait(2)
+        if autoBuyActive then _abScanAll() end
+    end)
+
+    task.spawn(function()
+        task.wait(1); _abScanAll()
+        while true do task.wait(0.15); if autoBuyActive then pcall(_abScanAll) end end
+    end)
+
+    -- ============================================================
+    -- SHARED BUILDERS
+    -- ============================================================
+    local function buildMoneyFarmTab(tab)
+        tab:CreateSection("Money Farm")
+        tab:CreateParagraph({Title="Under Maintenance",Content="The Money Farm system is currently being reworked."})
+    end
+
+    local function buildWorldESP(tab,inclPlayers)
+        local P="KH_ESP_"; local plrH,monH,atmH={},{},{}; local monC,atmC
+        local MONEY={"cash","money","dollar","bill","moneydrop","walletdrop","cashpickup"}
+        local ATM={"atm","cashpoint"}
+        local function nm(n,list) n=n:lower(); for _,k in ipairs(list) do if n:find(k) then return true end end return false end
+        local function addHL(obj,fc,oc,tag)
+            local hn=P..tag; if obj:FindFirstChild(hn) then return obj:FindFirstChild(hn) end
+            local h=Instance.new("Highlight"); h.Name=hn; h.FillColor=fc; h.OutlineColor=oc; h.FillTransparency=0.35; h.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; h.Parent=obj; return h
+        end
+        local function removeTag(list,tag)
+            for _,h in pairs(list) do pcall(function() h:Destroy() end) end
+            for _,o in pairs(workspace:GetDescendants()) do local h=o:FindFirstChild(P..tag); if h then h:Destroy() end end
+        end
+        if inclPlayers then
+            tab:CreateSection("Player ESP")
+            tab:CreateToggle({Name="Player ESP",CurrentValue=false,Callback=function(v)
+                if v then
+                    for _,p in pairs(Players:GetPlayers()) do if p~=LocalPlayer and p.Character then plrH[p]=addHL(p.Character,Color3.fromRGB(255,0,100),Color3.fromRGB(255,255,255),"PLR") end end
+                    Players.PlayerAdded:Connect(function(p) p.CharacterAdded:Connect(function(char) if not v then return end; task.wait(0.5); plrH[p]=addHL(char,Color3.fromRGB(255,0,100),Color3.fromRGB(255,255,255),"PLR") end) end)
+                    for _,p in pairs(Players:GetPlayers()) do p.CharacterAdded:Connect(function(char) if not v or p==LocalPlayer then return end; task.wait(0.5); plrH[p]=addHL(char,Color3.fromRGB(255,0,100),Color3.fromRGB(255,255,255),"PLR") end) end
+                else
+                    for _,p in pairs(Players:GetPlayers()) do if p.Character then local h=p.Character:FindFirstChild(P.."PLR"); if h then h:Destroy() end end end; plrH={}
+                end
+            end})
+        end
+        tab:CreateSection("World ESP")
+        tab:CreateToggle({Name="Money ESP",CurrentValue=false,Callback=function(v)
+            if v then
+                for _,o in pairs(workspace:GetDescendants()) do if (o:IsA("BasePart") or o:IsA("Model")) and nm(o.Name,MONEY) then table.insert(monH,addHL(o,Color3.fromRGB(50,220,80),Color3.fromRGB(255,255,255),"MONEY")) end end
+                monC=workspace.DescendantAdded:Connect(function(o) if (o:IsA("BasePart") or o:IsA("Model")) and nm(o.Name,MONEY) then task.wait(0.1); table.insert(monH,addHL(o,Color3.fromRGB(50,220,80),Color3.fromRGB(255,255,255),"MONEY")) end end)
+            else if monC then monC:Disconnect(); monC=nil end; removeTag(monH,"MONEY"); monH={} end
+        end})
+        tab:CreateToggle({Name="ATM ESP",CurrentValue=false,Callback=function(v)
+            if v then
+                for _,o in pairs(workspace:GetDescendants()) do if (o:IsA("BasePart") or o:IsA("Model")) and nm(o.Name,ATM) then table.insert(atmH,addHL(o,Color3.fromRGB(0,200,255),Color3.fromRGB(255,255,255),"ATM")) end end
+                atmC=workspace.DescendantAdded:Connect(function(o) if (o:IsA("BasePart") or o:IsA("Model")) and nm(o.Name,ATM) then task.wait(0.1); table.insert(atmH,addHL(o,Color3.fromRGB(0,200,255),Color3.fromRGB(255,255,255),"ATM")) end end)
+            else if atmC then atmC:Disconnect(); atmC=nil end; removeTag(atmH,"ATM"); atmH={} end
+        end})
+    end
+
+    -- ============================================================
+    -- BADDIES
+    -- ============================================================
+    if currentGame=="Baddies" then
+        local VIM=VIM_SERVICE or game:GetService("VirtualInputManager")
+        local UIS=UserInputService
+
+        local MainTab    = Window:CreateTab("Main",    false)
+        local FightTab   = Window:CreateTab("Fight",   false)
+        local VisualsTab = Window:CreateTab("Visuals", false)
+        local FarmsTab   = Window:CreateTab("Farms",   false)
+        local ItemsTab   = Window:CreateTab("Items",   false)
+        local MiscTab    = Window:CreateTab("Misc",    false)
+        local CmdsTab    = Window:CreateTab("Commands",true)
+        local AutoBuyTab = Window:CreateTab("AutoBuy", true)
+        local WagerTab   = Window:CreateTab("Wager",   true)
+
+        local remotes={}
+        task.spawn(function()
+            task.wait(1); pcall(function()
+                remotes.stomp=RS:WaitForChild("STOMPEVENT",5)
+                for _,v in pairs(RS.Modules.Net:GetDescendants()) do
+                    if v.Name=="RE/moneyGunDropCash"           then remotes.moneyGun     =v end
+                    if v.Name=="RE/walletDropCash"             then remotes.walletDrop   =v end
+                    if v.Name=="RE/taserRemote"                then remotes.taser        =v end
+                    if v.Name=="RE/Trading/TradeOfferReceived" then remotes.tradeReceived=v end
+                    if v.Name=="RF/Trading/DeclineTradeOffer"  then remotes.declineTrade =v end
+                    if v.Name=="RF/Trading/CancelTrade"        then remotes.cancelTrade  =v end
+                    if v.Name=="RE/LockPvp"                    then remotes.lockPvp      =v end
+                    if v.Name=="RE/UnLockPvp"                  then remotes.unlockPvp    =v end
+                end
+            end)
+        end)
+
+        local function getMyHRP() local c=LocalPlayer.Character; return c and c:FindFirstChild("HumanoidRootPart") end
+
+        -- â”€â”€ PATCH: added the 6 weapons that should never be used by auto fight â”€â”€
+        local SKIP_TOOLS={
+            "loveboard","loverboard","hoverboard","surfboard","skateboard","board",
+            "Brass Knuckles","Spiked Knuckles","Poison Knuckles",
+            "Bunny Shoes","Roller Skates","Champion Gloves",
+        }
+        local PUNCH_TOOLS={"knuckles","gloves","shoes","skates","champion","brass","poison","spiked","roller","bunny"}
+        local PUNCH_EV=RS:FindFirstChild("PUNCHEVENT")
+
+        local function getEquippedTool()
+            local c=LocalPlayer.Character; if not c then return end
+            for _,v in pairs(c:GetChildren()) do
+                if v:IsA("Tool") then
+                    local n=v.Name:lower(); local skip=false
+                    for _,s in ipairs(SKIP_TOOLS) do
+                        -- match either lowercase keyword or exact name
+                        if n==s:lower() or n:find(s:lower(),1,true) then skip=true; break end
+                    end
+                    if not skip then return v end
+                end
+            end
+        end
+
+        local function isPunchTool(tool)
+            if not tool then return false end
+            local n=tool.Name:lower()
+            for _,s in ipairs(PUNCH_TOOLS) do if n:find(s) then return true end end
+            return false
+        end
+
+        local function attackWithTool(tool)
+            if not tool then return end
+            if isPunchTool(tool) then
+                pcall(function()
+                    if not PUNCH_EV then PUNCH_EV=RS:FindFirstChild("PUNCHEVENT") end
+                    if PUNCH_EV then PUNCH_EV:FireServer() end
+                end)
+            else
+                pcall(function() tool:Activate() end)
+            end
+        end
+
+        local function isRagdolled(p)
+            if not p or not p.Character then return false end
+            -- Primary: check the Ragdolled character attribute (how this game tracks it)
+            if p.Character:GetAttribute("Ragdolled") == true then return true end
+            -- Fallback: humanoid state
+            local h=p.Character:FindFirstChildOfClass("Humanoid"); if not h then return false end
+            return h:GetState()==Enum.HumanoidStateType.Ragdoll or h:GetState()==Enum.HumanoidStateType.FallingDown
+        end
+        local function killSelf() local c=LocalPlayer.Character; if not c then return end; local h=c:FindFirstChildOfClass("Humanoid"); if h then h.Health=0 end end
+        local function getPlayerByPartialName(name)
+            name=name:lower()
+            for _,p in pairs(Players:GetPlayers()) do if p~=LocalPlayer and p.Name:lower():find(name,1,true) then return p end end
+        end
+
+        local autoFight=false; local autoDeclineTrades=true; local ragdollSlide=false
+        local slideSpeed=30; local slideDuration=2; local hitboxEnabled=false; local hitboxSize=10
+        local spamDelay=0.1; local sliding=false; local slideConn=nil
+        local autoKillOnSpawn=false; local slideEnabled=false; local infiniteJump=false; local flyEnabled=false
+        local proxStompEnabled=false; local slayStompEnabled=false
+        local RANGE=8; local PROX_STOMP_RADIUS=1.4; local SLAY_HP_THRESHOLD=1; local SLAY_HEIGHT_OFFSET=3.5
+        local function isInRange(p) local m=getMyHRP(); local t=p and p.Character and p.Character:FindFirstChild("HumanoidRootPart"); return m and t and (m.Position-t.Position).Magnitude<=RANGE end
+
+        local function pressE()
+            pcall(function() VIM:SendKeyEvent(true,Enum.KeyCode.E,false,game); task.wait(0.05); VIM:SendKeyEvent(false,Enum.KeyCode.E,false,game) end)
+        end
+
+        local function execCommand(msg)
+            if not isPremium then return end
+            local cmd=msg:lower():gsub("^%s+",""):gsub("%s+$","")
+            if cmd==".lock" then
+                pcall(function()
+                    local r=remotes.lockPvp or RS.Modules.Net:FindFirstChild("RE/LockPvp",true)
+                    if r then r:FireServer() end
+                end)
+            elseif cmd==".unlock" then
+                pcall(function()
+                    local r=remotes.unlockPvp or RS.Modules.Net:FindFirstChild("RE/UnLockPvp",true)
+                    if r then r:FireServer() end
+                end)
+            elseif cmd:sub(1,6)==".kill " then
+                local t=getPlayerByPartialName(cmd:sub(7)); if not t then return end
+                if PREMIUM_IDS[t.UserId] then return end
+                local char=t.Character; if char then local h=char:FindFirstChildOfClass("Humanoid"); if h then h.Health=0 end end
+            elseif cmd:sub(1,5)==".sit " then
+                local t=getPlayerByPartialName(cmd:sub(6)); if not t then return end
+                local char=t.Character; if char then local h=char:FindFirstChildOfClass("Humanoid"); if h then h.Sit=true end end
+            elseif cmd:sub(1,6)==".kick " then
+                local t=getPlayerByPartialName(cmd:sub(7)); if not t then return end
+                if PREMIUM_IDS[t.UserId] then return end
+                pcall(function() local char=t.Character; if char then local h=char:FindFirstChildOfClass("Humanoid"); if h then h.Health=0 end end end)
+            elseif cmd:sub(1,8)==".anchor " then
+                local t=getPlayerByPartialName(cmd:sub(9)); if not t then return end
+                local char=t.Character; if char then local hrp=char:FindFirstChild("HumanoidRootPart"); if hrp then hrp.Anchored=true end end
+            elseif cmd:sub(1,10)==".unanchor " then
+                local t=getPlayerByPartialName(cmd:sub(11)); if not t then return end
+                local char=t.Character; if char then local hrp=char:FindFirstChild("HumanoidRootPart"); if hrp then hrp.Anchored=false end end
+            end
+        end
+        LocalPlayer.Chatted:Connect(function(msg) execCommand(msg) end)
+
+        RunService.Heartbeat:Connect(function(dt)
+            local c=LocalPlayer.Character; local h=c and c:FindFirstChildOfClass("Humanoid"); if not h then return end
+            if slideEnabled then
+                local hrp=c:FindFirstChild("HumanoidRootPart")
+                if hrp and h.MoveDirection.Magnitude>0 then
+                    -- Use velocity instead of CFrame so we don't physically push other players
+                    hrp.AssemblyLinearVelocity = h.MoveDirection * 43
+                end
+            end
+        end)
+        UserInputService.JumpRequest:Connect(function()
+            if not infiniteJump then return end
+            local c=LocalPlayer.Character; local h=c and c:FindFirstChildOfClass("Humanoid"); if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end)
+        local function slide()
+            if sliding or not ragdollSlide then return end
+            local c=LocalPlayer.Character; if not c then return end
+            local rp=c:FindFirstChild("HumanoidRootPart"); if not rp then return end
+            sliding=true; local t=0; local dir=rp.CFrame.LookVector
+            if slideConn then slideConn:Disconnect() end
+            slideConn=RunService.Heartbeat:Connect(function(dt)
+                if t>=slideDuration then slideConn:Disconnect(); slideConn=nil; sliding=false; return end
+                if not rp or not rp.Parent then slideConn:Disconnect(); slideConn=nil; sliding=false; return end
+                rp.CFrame=rp.CFrame+dir*slideSpeed*dt; t=t+dt
+            end)
+        end
+        local function hookSlide(char)
+            local hum=char:WaitForChild("Humanoid",5); if not hum then return end
+            hum.StateChanged:Connect(function(_,s)
+                if s==Enum.HumanoidStateType.Physics then
+                    -- Game uses character attribute for ragdoll state (not BoolValue child)
+                    -- Only slide when WE are actually ragdolled
+                    local isRag = char:GetAttribute("Ragdolled")
+                    if isRag == true then
+                        slide()
+                    end
+                end
+            end)
+        end
+        if LocalPlayer.Character then task.spawn(function() hookSlide(LocalPlayer.Character) end) end
+
+        local function applyHitbox(on)
+            for _,p in pairs(Players:GetPlayers()) do if p~=LocalPlayer and p.Character then local hrp=p.Character:FindFirstChild("HumanoidRootPart"); if hrp then hrp.Size=on and Vector3.new(hitboxSize,hitboxSize,hitboxSize) or Vector3.new(2,2,1); hrp.CanCollide=false end end end
+        end
+        RunService.Heartbeat:Connect(function()
+            if not hitboxEnabled then return end
+            for _,p in pairs(Players:GetPlayers()) do if p~=LocalPlayer and p.Character then local hrp=p.Character:FindFirstChild("HumanoidRootPart"); if hrp and hrp.CanCollide then hrp.CanCollide=false end end end
+        end)
+
+        LocalPlayer.CharacterAdded:Connect(function(char)
+            sliding=false; if slideConn then slideConn:Disconnect(); slideConn=nil end
+            task.spawn(function() hookSlide(char) end); task.wait(0.5)
+            if autoKillOnSpawn then task.wait(0.2); killSelf() end
+            if flyEnabled then task.wait(0.5)
+                local hrp=char:FindFirstChild("HumanoidRootPart"); local hum=char:FindFirstChildOfClass("Humanoid")
+                if hrp and hum then hum.PlatformStand=true
+                    if not hrp:FindFirstChild("FlyGyro") then local bg=Instance.new("BodyGyro"); bg.MaxTorque=Vector3.new(4e5,4e5,4e5); bg.P=9e4; bg.D=1e3; bg.Name="FlyGyro"; bg.Parent=hrp end
+                    if not hrp:FindFirstChild("FlyVelocity") then local bv=Instance.new("BodyVelocity"); bv.MaxForce=Vector3.new(4e5,4e5,4e5); bv.Velocity=Vector3.zero; bv.Name="FlyVelocity"; bv.Parent=hrp end
+                end
+            end
+            task.wait(0.5); if hitboxEnabled then applyHitbox(true) end
+        end)
+        Players.PlayerAdded:Connect(function(p) p.CharacterAdded:Connect(function(char) if not hitboxEnabled then return end; task.wait(1); local hrp=char:FindFirstChild("HumanoidRootPart"); if hrp then hrp.Size=Vector3.new(hitboxSize,hitboxSize,hitboxSize); hrp.CanCollide=false end end) end)
+        for _,p in pairs(Players:GetPlayers()) do if p~=LocalPlayer then p.CharacterAdded:Connect(function(char) if not hitboxEnabled then return end; task.wait(1); local hrp=char:FindFirstChild("HumanoidRootPart"); if hrp then hrp.Size=Vector3.new(hitboxSize,hitboxSize,hitboxSize); hrp.CanCollide=false end end) end end
+
+        task.spawn(function()
+            task.wait(0.5); pcall(function()
+                local Net = RS.Modules.Net
+                local TradeReceived = Net:FindFirstChild("RE/Trading/TradeOfferReceived", true)
+                local DeclineTrade = Net:FindFirstChild("RF/Trading/DeclineTradeOffer", true)
+                local CancelTrade = Net:FindFirstChild("RF/Trading/CancelTrade", true)
+
+                local function closeTradeGuis()
+                    pcall(function()
+                        local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+                        if PlayerGui:FindFirstChild("TradeRequestPopup") then
+                            PlayerGui.TradeRequestPopup.Enabled = false
+                        end
+                        if PlayerGui:FindFirstChild("Trading") then
+                            PlayerGui.Trading.Enabled = false
+                        end
+                        local GuiController = require(LocalPlayer.PlayerScripts.Controllers.GuiController)
+                        if GuiController then
+                            GuiController:Close("TradeList")
+                            GuiController:Close("TokenStore")
+                            GuiController:Close("Trading")
+                        end
+                    end)
+                end
+
+                if TradeReceived then
+                    TradeReceived.OnClientEvent:Connect(function(senderData)
+                        if autoDeclineTrades then
+                            task.spawn(function()
+                                if CancelTrade then pcall(function() CancelTrade:InvokeServer() end) end
+                                if DeclineTrade and senderData then pcall(function() DeclineTrade:InvokeServer(senderData) end) end
+                                task.wait(0.05)
+                                closeTradeGuis()
+                            end)
+                        end
+                    end)
+                end
+
+                LocalPlayer:GetAttributeChangedSignal("IsTrading"):Connect(function()
+                    if autoDeclineTrades and LocalPlayer:GetAttribute("IsTrading") then
+                        task.spawn(function()
+                            if CancelTrade then pcall(function() CancelTrade:InvokeServer() end) end
+                            task.wait(0.05)
+                            closeTradeGuis()
+                        end)
+                    end
+                end)
+            end)
+        end)
+
+        local lastStomp=0
+        task.spawn(function()
+            while true do task.wait()
+                if not proxStompEnabled then continue end
+                if tick()-lastStomp<=0 then continue end
+                local myRoot=getMyHRP(); if not myRoot then continue end
+                for _,player in pairs(Players:GetPlayers()) do
+                    if player~=LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                        if isRagdolled(player) then
+                            local myPos=myRoot.Position; local targetPos=player.Character.HumanoidRootPart.Position
+                            local horizontalDistance=math.sqrt((myPos.X-targetPos.X)^2+(myPos.Z-targetPos.Z)^2)
+                            if horizontalDistance<=PROX_STOMP_RADIUS then
+                                pcall(function() if remotes.stomp then remotes.stomp:FireServer() end end)
+                                lastStomp=tick(); break
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+
+        task.spawn(function()
+            while true do task.wait(0.1); if slayStompEnabled then pcall(function()
+                for _,player in ipairs(Players:GetPlayers()) do
+                    if player~=LocalPlayer and player.Character then
+                        local tr=player.Character:FindFirstChild("HumanoidRootPart")
+                        local th=player.Character:FindFirstChildOfClass("Humanoid")
+                        if tr and th and th.Health>0 and th.Health<=SLAY_HP_THRESHOLD then
+                            local myRoot=getMyHRP(); if not myRoot then return end
+                            myRoot.CFrame=CFrame.new(tr.Position.X,tr.Position.Y+SLAY_HEIGHT_OFFSET,tr.Position.Z)
+                            task.wait(0.08); pressE(); task.wait(0.4)
+                        end
+                    end
+                end
+            end) end end
+        end)
+
+        -- MAIN TAB
+        MainTab:CreateSection("Defense")
+        MainTab:CreateToggle({Name="Ragdoll Slide",CurrentValue=false,Callback=function(v) ragdollSlide=v end})
+        MainTab:CreateSlider({Name="Slide Speed",Range={5,100},Increment=5,Suffix=" spd",CurrentValue=30,Callback=function(v) slideSpeed=v end})
+        MainTab:CreateSlider({Name="Slide Duration",Range={1,6},Increment=1,Suffix=" sec",CurrentValue=2,Callback=function(v) slideDuration=v end})
+        MainTab:CreateSection("Hitbox")
+        MainTab:CreateSlider({Name="Hitbox Size",Range={2,50},Increment=1,Suffix=" size",CurrentValue=10,Callback=function(v) hitboxSize=v; if hitboxEnabled then applyHitbox(true) end end})
+        MainTab:CreateToggle({Name="Expand Hitbox",CurrentValue=false,Callback=function(v) hitboxEnabled=v; applyHitbox(v) end})
+        MainTab:CreateSection("Inventory")
+        MainTab:CreateToggle({Name="Remove Inventory Cooldown",CurrentValue=true,Callback=function(v)
+            pcall(function()
+                local BC = require(LocalPlayer.PlayerScripts.Controllers.BackpackController)
+                if v then
+                    BC._disableSpam = function() end
+                else
+                    BC._disableSpam = function(p1)
+                        if p1._spamThread then task.cancel(p1._spamThread); p1._spamThread = nil end
+                        p1._spamThread = task.spawn(function()
+                            p1._spamDelay = true; p1:_disable(); task.wait(3); p1._spamDelay = false; p1:_enable()
+                        end)
+                    end
+                end
+            end)
+        end})
+        pcall(function()
+            require(LocalPlayer.PlayerScripts.Controllers.BackpackController)._disableSpam = function() end
+        end)
+
+        -- FIGHT TAB
+        FightTab:CreateSection("Auto Combat")
+        FightTab:CreateToggle({Name="Auto Fight [B keybind]",CurrentValue=false,Callback=function(v)
+            autoFight=v
+            if v then task.spawn(function()
+                while autoFight do task.wait(spamDelay); pcall(function()
+                    local myHRP=getMyHRP(); if not myHRP then return end
+                    local target,shortest=nil,RANGE
+                    for _,p in pairs(Players:GetPlayers()) do if p~=LocalPlayer and p.Character then local hrp=p.Character:FindFirstChild("HumanoidRootPart"); if hrp then local d=(myHRP.Position-hrp.Position).Magnitude; if d<shortest then shortest=d; target=p end end end end
+                    if target and isInRange(target) then local t=getEquippedTool(); if t then attackWithTool(t) end end
+                end) end
+            end) end
+        end})
+        FightTab:CreateSlider({Name="Fight Distance",Range={5,50},Increment=1,Suffix=" studs",CurrentValue=8,Callback=function(v) RANGE=v end})
+        FightTab:CreateToggle({Name="Auto-Stomp",CurrentValue=false,Callback=function(v) proxStompEnabled=v end})
+
+        -- VISUALS TAB
+        buildWorldESP(VisualsTab,true)
+
+        -- FARMS TAB
+        buildMoneyFarmTab(FarmsTab)
+        FarmsTab:CreateSection("Slay Farm")
+        FarmsTab:CreateToggle({Name="Slay Farm",CurrentValue=false,Callback=function(v) slayStompEnabled=v end})
+
+        -- ITEMS TAB
+        local function buyItem(partName,times)
+            times=times or 1
+            local cf=workspace:FindFirstChild("Cash"); if not cf then return false end
+            local item=cf:FindFirstChild(partName); if not item then return false end
+            local prompt=item:FindFirstChildOfClass("ProximityPrompt"); if not prompt then return false end
+            local char=LocalPlayer.Character; local hrp=char and char:FindFirstChild("HumanoidRootPart"); if not hrp then return false end
+            local orig=hrp.CFrame; hrp.CFrame=item.CFrame+Vector3.new(0,3,0); task.wait(0.2)
+            for i=1,times do pcall(function() fireproximityprompt(prompt) end); if times>1 then task.wait(0.15) end end
+            task.wait(0.3); hrp.CFrame=orig; return true
+        end
+        local foodItems={{name="Recovery Drink",part="comprarRecovery"},{name="Fires",part="comprarFires"},{name="Chispys",part="comprarChispys"},{name="Super Pretzels",part="comprarSuperPretzels"},{name="Chicken Nugget",part="comprarChickenNugget"},{name="Chicken Bucket",part="comprarChickenBucket"},{name="Taco Ball",part="comprarTacoBall"},{name="Poyo",part="comprarPoyo"}}
+        local weaponItems={{name="RPG",part="botonComprarRPG"},{name="RPG Ammo (x5)",part="botonAmmoRPG",buyTimes=5},{name="Boxing Gloves",part="botonComprarBoxingGloves"},{name="Remove Boxing Gloves",part="botonRemoverBoxingGloves"},{name="Taser",part="comprarTaser"},{name="Gas Bomb",part="botonCompraGasBomb"},{name="Gas Mask",part="botonCompraGasMask"},{name="Spa Slippers",part="comprarSpaSlippers"},{name="Heels",part="botonComprarHeels"},{name="Mask",part="botonComprarMask"},{name="Dog Leash",part="botonComprarDogLeash"},{name="Frying Pan",part="Pan Buy button"}}
+        ItemsTab:CreateSection("Food & Drinks")
+        for _,item in ipairs(foodItems) do
+            ItemsTab:CreateButton({Name="Buy "..item.name,Callback=function() task.spawn(function() buyItem(item.part) end) end})
+        end
+        ItemsTab:CreateButton({Name="Buy All Food",Callback=function() task.spawn(function() for _,item in ipairs(foodItems) do buyItem(item.part); task.wait(0.6) end end) end})
+        ItemsTab:CreateSection("Weapons & Gear")
+        for _,item in ipairs(weaponItems) do
+            ItemsTab:CreateButton({Name="Buy "..item.name,Callback=function() task.spawn(function() buyItem(item.part,item.buyTimes or 1) end) end})
+        end
+        ItemsTab:CreateButton({Name="Buy All Weapons",Callback=function() task.spawn(function() for _,item in ipairs(weaponItems) do buyItem(item.part,1); task.wait(0.6) end end) end})
+
+        -- MISC TAB
+        MiscTab:CreateSection("Anti Stealer")
+        MiscTab:CreateToggle({Name="Auto Decline Trades",CurrentValue=true,Callback=function(v) autoDeclineTrades=v end})
+        MiscTab:CreateSection("Utilities")
+        MiscTab:CreateButton({Name="Load Infinite Yield",Callback=function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+        end})
+        MiscTab:CreateSection("Self")
+        MiscTab:CreateToggle({Name="Auto Kill on Spawn",CurrentValue=false,Callback=function(v) autoKillOnSpawn=v end})
+        MiscTab:CreateButton({Name="Kill Self",Callback=function() killSelf() end})
+        MiscTab:CreateSection("Movement")
+        MiscTab:CreateToggle({Name="Super Slide",CurrentValue=false,Callback=function(v) slideEnabled=v end})
+        MiscTab:CreateToggle({Name="Infinite Jump",CurrentValue=false,Callback=function(v) infiniteJump=v end})
+        local noclipConn=nil
+        MiscTab:CreateToggle({Name="Noclip",CurrentValue=false,Callback=function(v)
+            if noclipConn then noclipConn:Disconnect(); noclipConn=nil end
+            if v then
+                noclipConn=RunService.Stepped:Connect(function() local c=LocalPlayer.Character; if not c then return end; for _,p in pairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end)
+            else
+                local c=LocalPlayer.Character; if c then for _,p in pairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=true end end end
+            end
+        end})
+        MiscTab:CreateToggle({Name="Fly (PC only)",CurrentValue=false,Callback=function(v)
+            flyEnabled=v
+            local char=LocalPlayer.Character; local hrp=char and char:FindFirstChild("HumanoidRootPart"); local hum=char and char:FindFirstChildOfClass("Humanoid")
+            if not hrp or not hum then return end
+            if v then
+                hum.PlatformStand=true
+                local bg=Instance.new("BodyGyro"); bg.MaxTorque=Vector3.new(4e5,4e5,4e5); bg.P=9e4; bg.D=1e3; bg.Name="FlyGyro"; bg.Parent=hrp
+                local bv=Instance.new("BodyVelocity"); bv.MaxForce=Vector3.new(4e5,4e5,4e5); bv.Velocity=Vector3.zero; bv.Name="FlyVelocity"; bv.Parent=hrp
+                local fc; fc=RunService.RenderStepped:Connect(function()
+                    if not flyEnabled then fc:Disconnect(); return end
+                    local cam=workspace.CurrentCamera; local dir=Vector3.zero
+                    if UIS:IsKeyDown(Enum.KeyCode.W) then dir+=cam.CFrame.LookVector end
+                    if UIS:IsKeyDown(Enum.KeyCode.S) then dir-=cam.CFrame.LookVector end
+                    if UIS:IsKeyDown(Enum.KeyCode.A) then dir-=cam.CFrame.RightVector end
+                    if UIS:IsKeyDown(Enum.KeyCode.D) then dir+=cam.CFrame.RightVector end
+                    if UIS:IsKeyDown(Enum.KeyCode.Space) then dir+=Vector3.new(0,1,0) end
+                    if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then dir-=Vector3.new(0,1,0) end
+                    bv.Velocity=dir.Magnitude>0 and dir.Unit*60 or Vector3.zero; bg.CFrame=cam.CFrame
+                end)
+            else
+                flyEnabled=false; hum.PlatformStand=false
+                local fg=hrp:FindFirstChild("FlyGyro"); if fg then fg:Destroy() end
+                local fv=hrp:FindFirstChild("FlyVelocity"); if fv then fv:Destroy() end
+            end
+        end})
+        MiscTab:CreateSection("AFK")
+        local afkActive=false
+        local function startAfkLoop()
+            task.spawn(function()
+                while afkActive do
+                    task.wait(300)
+                    if not afkActive then break end
+                    pcall(function()
+                        if VIM then
+                            VIM:SendMouseMoveEvent(1,0,game)
+                            task.wait(0.05)
+                            VIM:SendMouseMoveEvent(-1,0,game)
+                        end
+                    end)
+                end
+            end)
+        end
+        MiscTab:CreateToggle({Name="Anti-AFK",CurrentValue=false,Callback=function(v) afkActive=v; if v then startAfkLoop() end end})
+
+        -- COMMANDS TAB
+        CmdsTab:CreateSection("PvP Control")
+        CmdsTab:CreateButton({Name="Lock PvP",Callback=function() execCommand(".lock") end})
+        CmdsTab:CreateButton({Name="Unlock PvP",Callback=function() execCommand(".unlock") end})
+        CmdsTab:CreateSection("Player Commands")
+        CmdsTab:CreateParagraph({Title="Commands",Content="Player commands are being reworked."})
+
+        -- AUTOBUY TAB
+        local abSF=create("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=Theme.Element,BorderSizePixel=0},AutoBuyTab._frame)
+        create("UICorner",{CornerRadius=UDim.new(0,7)},abSF)
+        local abStatusLbl=create("TextLabel",{Text="Auto Buy: ON",Font=FontBold,TextSize=12,TextColor3=Color3.fromRGB(100,220,130),BackgroundTransparency=1,Size=UDim2.new(1,-20,1,0),Position=UDim2.new(0,10,0,0),TextXAlignment=Enum.TextXAlignment.Left},abSF)
+        local abSt=create("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=Theme.Element,BorderSizePixel=0},AutoBuyTab._frame)
+        create("UICorner",{CornerRadius=UDim.new(0,7)},abSt)
+        local abBoughtLbl=create("TextLabel",{Text="Bought: 0",Font=FontBold,TextSize=11,TextColor3=Color3.fromRGB(100,220,180),BackgroundTransparency=1,Size=UDim2.new(0.5,-5,1,0),Position=UDim2.new(0,10,0,0),TextXAlignment=Enum.TextXAlignment.Left},abSt)
+        local abSpentLbl=create("TextLabel",{Text="Spent: 0",Font=FontBold,TextSize=11,TextColor3=Color3.fromRGB(255,120,120),BackgroundTransparency=1,Size=UDim2.new(0.5,-5,1,0),Position=UDim2.new(0.5,5,0,0),TextXAlignment=Enum.TextXAlignment.Left},abSt)
+        AutoBuyTab:CreateToggle({Name="Enable Auto Buy",CurrentValue=true,Callback=function(v)
+            autoBuyActive=v
+            if v then
+                abStatusLbl.Text="Auto Buy: ON"; abStatusLbl.TextColor3=Color3.fromRGB(100,220,130)
+                inFlight={}; task.spawn(function() pcall(_abScanAll) end)
+            else
+                abStatusLbl.Text="Auto Buy: OFF"; abStatusLbl.TextColor3=Color3.fromRGB(255,80,80)
+            end
+        end})
+        AutoBuyTab:CreateButton({Name="Reset Stats",Callback=function()
+            autoBoughtCount=0; autoBoughtSpent=0; inFlight={}
+            abBoughtLbl.Text="Bought: 0"; abSpentLbl.Text="Spent: 0"
+        end})
+        task.spawn(function() while true do task.wait(0.5); abBoughtLbl.Text="Bought: "..autoBoughtCount; abSpentLbl.Text="Spent: "..autoBoughtSpent end end)
+
+        -- WAGER TAB
+        do
+            local duelNet = RS.Modules.Net
+            local function getDuelRemote(name) return duelNet:FindFirstChild(name, true) end
+
+            WagerTab:CreateSection("Duel Control")
+
+            WagerTab:CreateButton({Name="End Duel",Callback=function()
+                pcall(function()
+                    local r = getDuelRemote("RE/Duel/Cancel")
+                    if r then r:FireServer(); Notify({Title="Duel",Content="Duel ended.",Duration=2}) end
+                end)
+            end})
+        end
+
+    -- ============================================================
+    -- BADDIES TRADING PLAZA
+    -- ============================================================
+    elseif currentGame=="BaddiesTradingPlaza" then
+        local VIM=VIM_SERVICE or game:GetService("VirtualInputManager")
+        local FarmTab=Window:CreateTab("Farm",false)
+        local VisualsTab=Window:CreateTab("Visuals",false)
+        local MiscTab=Window:CreateTab("Misc",false)
+        local AutoBuyTab=Window:CreateTab("AutoBuy",true)
+
+        local remotes={}
+        task.spawn(function()
+            task.wait(1); pcall(function()
+                for _,v in pairs(RS.Modules.Net:GetDescendants()) do
+                    if v.Name=="RE/Trading/TradeOfferReceived" then remotes.tradeReceived=v end
+                    if v.Name=="RF/Trading/DeclineTradeOffer"  then remotes.declineTrade =v end
+                    if v.Name=="RF/Trading/CancelTrade"        then remotes.cancelTrade  =v end
+                end
+            end)
+        end)
+
+        local autoDeclineTrades=true
+        task.spawn(function()
+            task.wait(0.5); pcall(function()
+                local Net = RS.Modules.Net
+                local TradeReceived = Net:FindFirstChild("RE/Trading/TradeOfferReceived", true)
+                local DeclineTrade = Net:FindFirstChild("RF/Trading/DeclineTradeOffer", true)
+                local CancelTrade = Net:FindFirstChild("RF/Trading/CancelTrade", true)
+
+                local function closeTradeGuis()
+                    pcall(function()
+                        local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+                        if PlayerGui:FindFirstChild("TradeRequestPopup") then
+                            PlayerGui.TradeRequestPopup.Enabled = false
+                        end
+                        if PlayerGui:FindFirstChild("Trading") then
+                            PlayerGui.Trading.Enabled = false
+                        end
+                        local GuiController = require(LocalPlayer.PlayerScripts.Controllers.GuiController)
+                        if GuiController then
+                            GuiController:Close("TradeList")
+                            GuiController:Close("TokenStore")
+                            GuiController:Close("Trading")
+                        end
+                    end)
+                end
+
+                if TradeReceived then
+                    TradeReceived.OnClientEvent:Connect(function(senderData)
+                        if autoDeclineTrades then
+                            task.spawn(function()
+                                if CancelTrade then pcall(function() CancelTrade:InvokeServer() end) end
+                                if DeclineTrade and senderData then pcall(function() DeclineTrade:InvokeServer(senderData) end) end
+                                task.wait(0.05)
+                                closeTradeGuis()
+                            end)
+                        end
+                    end)
+                end
+
+                LocalPlayer:GetAttributeChangedSignal("IsTrading"):Connect(function()
+                    if autoDeclineTrades and LocalPlayer:GetAttribute("IsTrading") then
+                        task.spawn(function()
+                            if CancelTrade then pcall(function() CancelTrade:InvokeServer() end) end
+                            task.wait(0.05)
+                            closeTradeGuis()
+                        end)
+                    end
+                end)
+            end)
+        end)
+
+        buildMoneyFarmTab(FarmTab)
+        FarmTab:CreateSection("Anti Stealer")
+        FarmTab:CreateToggle({Name="Auto Decline Trades",CurrentValue=true,Callback=function(v) autoDeclineTrades=v end})
+        buildWorldESP(VisualsTab,false)
+
+        local slideEnabled2=false; local infiniteJump2=false
+        RunService.Heartbeat:Connect(function(dt)
+            local c=LocalPlayer.Character; local h=c and c:FindFirstChildOfClass("Humanoid"); if not h then return end
+            if slideEnabled2 then local hrp=c:FindFirstChild("HumanoidRootPart"); if hrp and h.MoveDirection.Magnitude>0 then hrp.CFrame=hrp.CFrame+(h.MoveDirection*43*dt) end end
+        end)
+        UserInputService.JumpRequest:Connect(function()
+            if not infiniteJump2 then return end
+            local c=LocalPlayer.Character; local h=c and c:FindFirstChildOfClass("Humanoid"); if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end)
+        MiscTab:CreateSection("Movement")
+        MiscTab:CreateToggle({Name="Super Slide",CurrentValue=false,Callback=function(v) slideEnabled2=v end})
+        MiscTab:CreateToggle({Name="Infinite Jump",CurrentValue=false,Callback=function(v) infiniteJump2=v end})
+        MiscTab:CreateSection("AFK")
+        local afkActive2=false
+        local function startAfkLoop2()
+            task.spawn(function()
+                while afkActive2 do
+                    task.wait(300)
+                    if not afkActive2 then break end
+                    pcall(function()
+                        if VIM then VIM:SendMouseMoveEvent(1,0,game); task.wait(0.05); VIM:SendMouseMoveEvent(-1,0,game) end
+                    end)
+                end
+            end)
+        end
+        MiscTab:CreateToggle({Name="Anti-AFK",CurrentValue=false,Callback=function(v) afkActive2=v; if v then startAfkLoop2() end end})
+
+        local abSF2=create("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=Theme.Element,BorderSizePixel=0},AutoBuyTab._frame)
+        create("UICorner",{CornerRadius=UDim.new(0,7)},abSF2)
+        local abStatusLbl2=create("TextLabel",{Text="Auto Buy: ON",Font=FontBold,TextSize=12,TextColor3=Color3.fromRGB(100,220,130),BackgroundTransparency=1,Size=UDim2.new(1,-20,1,0),Position=UDim2.new(0,10,0,0),TextXAlignment=Enum.TextXAlignment.Left},abSF2)
+        local abSt2=create("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=Theme.Element,BorderSizePixel=0},AutoBuyTab._frame)
+        create("UICorner",{CornerRadius=UDim.new(0,7)},abSt2)
+        local abBoughtLbl2=create("TextLabel",{Text="Bought: 0",Font=FontBold,TextSize=11,TextColor3=Color3.fromRGB(100,220,180),BackgroundTransparency=1,Size=UDim2.new(0.5,-5,1,0),Position=UDim2.new(0,10,0,0),TextXAlignment=Enum.TextXAlignment.Left},abSt2)
+        local abSpentLbl2=create("TextLabel",{Text="Spent: 0",Font=FontBold,TextSize=11,TextColor3=Color3.fromRGB(255,120,120),BackgroundTransparency=1,Size=UDim2.new(0.5,-5,1,0),Position=UDim2.new(0.5,5,0,0),TextXAlignment=Enum.TextXAlignment.Left},abSt2)
+        AutoBuyTab:CreateToggle({Name="Enable Auto Buy",CurrentValue=true,Callback=function(v)
+            autoBuyActive=v
+            if v then
+                abStatusLbl2.Text="Auto Buy: ON"; abStatusLbl2.TextColor3=Color3.fromRGB(100,220,130)
+                inFlight={}; task.spawn(function() pcall(_abScanAll) end)
+            else
+                abStatusLbl2.Text="Auto Buy: OFF"; abStatusLbl2.TextColor3=Color3.fromRGB(255,80,80)
+            end
+        end})
+        AutoBuyTab:CreateButton({Name="Reset Stats",Callback=function()
+            autoBoughtCount=0; autoBoughtSpent=0; inFlight={}
+            abBoughtLbl2.Text="Bought: 0"; abSpentLbl2.Text="Spent: 0"
+        end})
+        task.spawn(function() while true do task.wait(0.5); abBoughtLbl2.Text="Bought: "..autoBoughtCount; abSpentLbl2.Text="Spent: "..autoBoughtSpent end end)
+    end
+end
+
+task.spawn(runLoader)
