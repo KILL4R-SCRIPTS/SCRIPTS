@@ -1,8 +1,10 @@
 {
   "active": true,
-  "version": "3.3",
+  "version": "3.2",
+  "command": "",
+  "command_token": "1",
   "broadcast": "",
-  "reload_all": false,
+  "reload_id": "",
   "blacklisted_ids": [],
   "premium_ids": [
     2442228339,
