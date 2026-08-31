@@ -2,7 +2,7 @@
   "active": true,
   "version": "3.2",
   "broadcast": "",
-  "reload_all": false,
+  "reload_all": true,
   "blacklisted_ids": [],
   "premium_ids": [
     2442228339,
