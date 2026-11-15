@@ -575,6 +575,7 @@ function KW.clearAllHeldKeys()
 	if KW.dispatchedHeldKeys then table.clear(KW.dispatchedHeldKeys) end
 	currentSpamKey = nil
 	currentSpamKeyCode = nil
+	if updateSpamVisuals then pcall(updateSpamVisuals) end
 end
 
 -- ============================================================================
@@ -5482,6 +5483,7 @@ trackConn(RunService.RenderStepped:Connect(function()
 		end
 	end
 	KW.syncActiveHeldKey()
+	updateSpamVisuals()
 	local now = os.clock()
 	local interval = (state.maxSpeed or (state.cps and state.cps >= 300)) and 0 or (1 / math.max(state.cps or 300, 1))
 	local kbSpamming = state.outspammer and currentSpamKey and state.spamKeys[currentSpamKey] and currentSpamKey ~= "Fly" and currentSpamKey ~= "Q"
@@ -5520,32 +5522,188 @@ trackConn(RunService.RenderStepped:Connect(function()
 		end
 	end
 end))
--- On-screen HUD button hooks: track held state (including MobileKeys & hold-while-ragdolled)
+-- On-screen HUD button hooks: track held state, exact-shape SPAM ring + bottom SPAM pill, and hold-while-ragdolled
 local hookedHudContainers = setmetatable({}, { __mode = "k" })
-local registeredHudButtons = {} -- [abilityName] = guiButton
+local registeredHudButtons = {} -- list of { abilityName = string, btn = GuiObject, visualTarget = GuiObject }
+local spamVisualsByKey = {} -- [abilityName] = { { ring = GuiObject, outer = GuiObject, pill = Frame }, ... }
+local activeTouchInputs = setmetatable({}, { __mode = "k" })
 
-local function registerHudAbilityButton(btn, abilityName)
+local function isGuiActuallyVisible(gui)
+	local cur = gui
+	while cur and cur:IsA("GuiBase2d") do
+		if cur:IsA("GuiObject") and not cur.Visible then
+			return false
+		elseif cur:IsA("LayerCollector") and not cur.Enabled then
+			return false
+		end
+		cur = cur.Parent
+	end
+	return true
+end
+
+local function ensureSpamVisual(visualTarget, abilityName)
+	if not visualTarget or not visualTarget:IsA("GuiObject") then return nil end
+	local existingRing = visualTarget:FindFirstChild("KW_SpamRing")
+	local existingOuter = visualTarget:FindFirstChild("KW_SpamRingOuter")
+	local existingPill = visualTarget:FindFirstChild("KW_SpamPill")
+	if existingRing and existingPill then
+		return { ring = existingRing, outer = existingOuter, pill = existingPill }
+	end
+
+	local corner = visualTarget:FindFirstChildOfClass("UICorner")
+	local z = visualTarget.ZIndex or 1
+	local ring, outer
+
+	if not corner and (visualTarget:IsA("ImageButton") or visualTarget:IsA("ImageLabel")) and visualTarget.Image ~= "" then
+		-- Exact silhouette ring for custom shapes (e.g. hexagon buttons in New Fender)
+		ring = Instance.new("ImageLabel")
+		ring.Name = "KW_SpamRing"
+		ring.AnchorPoint = Vector2.new(0.5, 0.5)
+		ring.Position = UDim2.fromScale(0.5, 0.5)
+		ring.Size = UDim2.fromScale(1.15, 1.15)
+		ring.BackgroundTransparency = 1
+		ring.Image = visualTarget.Image
+		ring.ImageColor3 = Color3.fromRGB(56, 152, 255)
+		ring.ImageTransparency = 0.05
+		ring.ScaleType = visualTarget.ScaleType
+		ring.ZIndex = math.max(0, z - 1)
+		ring.Visible = false
+		ring.Parent = visualTarget
+
+		outer = Instance.new("ImageLabel")
+		outer.Name = "KW_SpamRingOuter"
+		outer.AnchorPoint = Vector2.new(0.5, 0.5)
+		outer.Position = UDim2.fromScale(0.5, 0.5)
+		outer.Size = UDim2.fromScale(1.25, 1.25)
+		outer.BackgroundTransparency = 1
+		outer.Image = visualTarget.Image
+		outer.ImageColor3 = Color3.fromRGB(96, 180, 255)
+		outer.ImageTransparency = 0.45
+		outer.ScaleType = visualTarget.ScaleType
+		outer.ZIndex = math.max(0, z - 2)
+		outer.Visible = false
+		outer.Parent = visualTarget
+	else
+		-- Exact UIStroke ring matching UICorner shape (e.g. circles in MobileKeys / Heroes)
+		local cornerRadius = corner and corner.CornerRadius or UDim.new(1, 0)
+		ring = Instance.new("Frame")
+		ring.Name = "KW_SpamRing"
+		ring.AnchorPoint = Vector2.new(0.5, 0.5)
+		ring.Position = UDim2.fromScale(0.5, 0.5)
+		ring.Size = UDim2.fromScale(1.16, 1.16)
+		ring.BackgroundTransparency = 1
+		ring.ZIndex = z + 2
+		ring.Visible = false
+		local c1 = Instance.new("UICorner")
+		c1.CornerRadius = cornerRadius
+		c1.Parent = ring
+		local s1 = Instance.new("UIStroke")
+		s1.Color = Color3.fromRGB(56, 152, 255)
+		s1.Thickness = 2.5
+		s1.Transparency = 0.05
+		s1.Parent = ring
+		ring.Parent = visualTarget
+
+		outer = Instance.new("Frame")
+		outer.Name = "KW_SpamRingOuter"
+		outer.AnchorPoint = Vector2.new(0.5, 0.5)
+		outer.Position = UDim2.fromScale(0.5, 0.5)
+		outer.Size = UDim2.fromScale(1.28, 1.28)
+		outer.BackgroundTransparency = 1
+		outer.ZIndex = z + 1
+		outer.Visible = false
+		local c2 = Instance.new("UICorner")
+		c2.CornerRadius = cornerRadius
+		c2.Parent = outer
+		local s2 = Instance.new("UIStroke")
+		s2.Color = Color3.fromRGB(96, 180, 255)
+		s2.Thickness = 1.5
+		s2.Transparency = 0.45
+		s2.Parent = outer
+		outer.Parent = visualTarget
+	end
+
+	-- Bottom "SPAM" pill indicator
+	local pill = Instance.new("Frame")
+	pill.Name = "KW_SpamPill"
+	pill.AnchorPoint = Vector2.new(0.5, 0)
+	pill.Position = UDim2.new(0.5, 0, 1, 3)
+	pill.Size = UDim2.fromOffset(42, 15)
+	pill.BackgroundColor3 = Color3.fromRGB(37, 99, 235)
+	pill.BorderSizePixel = 0
+	pill.ZIndex = z + 6
+	pill.Visible = false
+	local pc = Instance.new("UICorner")
+	pc.CornerRadius = UDim.new(1, 0)
+	pc.Parent = pill
+	local pl = Instance.new("TextLabel")
+	pl.Name = "Label"
+	pl.Size = UDim2.fromScale(1, 1)
+	pl.BackgroundTransparency = 1
+	pl.Font = Enum.Font.GothamBold
+	pl.Text = "SPAM"
+	pl.TextSize = 9
+	pl.TextColor3 = Color3.new(1, 1, 1)
+	pl.ZIndex = z + 7
+	pl.Parent = pill
+	pill.Parent = visualTarget
+
+	local entry = { ring = ring, outer = outer, pill = pill }
+	spamVisualsByKey[abilityName] = spamVisualsByKey[abilityName] or {}
+	table.insert(spamVisualsByKey[abilityName], entry)
+	return entry
+end
+
+local function updateSpamVisuals()
+	for abilityName, entries in pairs(spamVisualsByKey) do
+		local active = state.outspammer and abilityName ~= "Fly" and abilityName ~= "Q"
+			and (KW.heldHudButtons[abilityName] == true or heldKeys[abilityName] ~= nil)
+		for i = #entries, 1, -1 do
+			local e = entries[i]
+			if not e.ring or not e.ring.Parent then
+				table.remove(entries, i)
+			else
+				e.ring.Visible = active
+				if e.outer then e.outer.Visible = active end
+				if e.pill then e.pill.Visible = active end
+			end
+		end
+	end
+end
+
+local function beginHudButtonHold(abilityName, input)
+	if not abilityName or activeTouchInputs[input] then return end
+	activeTouchInputs[input] = true
+	local now = os.clock()
+	KW.heldHudButtons[abilityName] = true
+	KW.keyPressedAt[abilityName] = now
+	KW.recentSpamConfirmUntil = now + 0.2
+	KW.pushHeldKey(abilityName, true)
+	updateSpamVisuals()
+	local conn
+	conn = input:GetPropertyChangedSignal("UserInputState"):Connect(function()
+		if input.UserInputState == Enum.UserInputState.End or input.UserInputState == Enum.UserInputState.Cancel then
+			conn:Disconnect()
+			activeTouchInputs[input] = nil
+			KW.heldHudButtons[abilityName] = nil
+			KW.popHeldKey(abilityName)
+			sendRelease(abilityName, false)
+			updateSpamVisuals()
+		end
+	end)
+end
+
+local function registerHudAbilityButton(btn, abilityName, visualTarget)
 	if not btn or not btn:IsA("GuiObject") then return end
 	if not abilityName or abilityName == "" or abilityName == "Button" then return end
-	registeredHudButtons[abilityName] = btn
+	visualTarget = visualTarget or btn
+	ensureSpamVisual(visualTarget, abilityName)
+	table.insert(registeredHudButtons, { abilityName = abilityName, btn = btn, visualTarget = visualTarget })
 	if KW.hudHooked[btn] then return end
 	KW.hudHooked[btn] = true
 	trackConn(btn.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-			local now = os.clock()
-			KW.heldHudButtons[abilityName] = true
-			KW.keyPressedAt[abilityName] = now
-			KW.recentSpamConfirmUntil = now + 0.2
-			KW.pushHeldKey(abilityName, true)
-			local conn
-			conn = input:GetPropertyChangedSignal("UserInputState"):Connect(function()
-				if input.UserInputState == Enum.UserInputState.End or input.UserInputState == Enum.UserInputState.Cancel then
-					conn:Disconnect()
-					KW.heldHudButtons[abilityName] = nil
-					KW.popHeldKey(abilityName)
-					sendRelease(abilityName, false)
-				end
-			end)
+			beginHudButtonHold(abilityName, input)
 		end
 	end))
 end
@@ -5556,9 +5714,9 @@ local function hookHudContainer(container, isMobileIcons)
 		if not child:IsA("GuiObject") then return end
 		if isMobileIcons then
 			local btn = child:FindFirstChild("Button") or child
-			registerHudAbilityButton(btn, child.Name)
+			registerHudAbilityButton(btn, child.Name, child)
 		else
-			registerHudAbilityButton(child, child.Name)
+			registerHudAbilityButton(child, child.Name, child)
 		end
 	end
 	for _, child in ipairs(container:GetChildren()) do
@@ -5586,40 +5744,27 @@ local function hookHudButtons()
 		hookedHudContainers[profile] = true
 		trackConn(profile.ChildAdded:Connect(function(child)
 			if child.Name == "TemplateKeysHolder" or child.Name == "KeysHolder"
-				or child.Name == "TemplateExtraKeysHolder" or child.Name == "ExtraKeysHolder" then
-				task.defer(hookHudButtons)
-			elseif child.Name == "MobileKeys" then
+				or child.Name == "TemplateExtraKeysHolder" or child.Name == "ExtraKeysHolder"
+				or child.Name == "MobileKeys" then
 				task.defer(hookHudButtons)
 			end
 		end))
 	end
 end
 
--- Touch hit-test fallback so holding a mobile ability button works even when Cooldown/Ragdoll overlay covers it
+-- Touch hit-test fallback so holding a visible mobile ability button works even when Cooldown/Ragdoll overlay covers it
 trackConn(UserInputService.TouchStarted:Connect(function(touch)
-	if not isNewFender or not state.outspammer then return end
+	if not isNewFender or not state.outspammer or activeTouchInputs[touch] then return end
 	local pos = touch.Position
-	for abilityName, btn in pairs(registeredHudButtons) do
-		if btn and btn.Parent and btn.Visible then
+	for _, rec in ipairs(registeredHudButtons) do
+		local btn = rec.btn
+		if btn and btn.Parent and isGuiActuallyVisible(btn) then
 			local ap = btn.AbsolutePosition
 			local as = btn.AbsoluteSize
 			if as.X > 0 and as.Y > 0
 				and pos.X >= ap.X and pos.X <= (ap.X + as.X)
 				and pos.Y >= ap.Y and pos.Y <= (ap.Y + as.Y) then
-				local now = os.clock()
-				KW.heldHudButtons[abilityName] = true
-				KW.keyPressedAt[abilityName] = now
-				KW.recentSpamConfirmUntil = now + 0.2
-				KW.pushHeldKey(abilityName, true)
-				local conn
-				conn = touch:GetPropertyChangedSignal("UserInputState"):Connect(function()
-					if touch.UserInputState == Enum.UserInputState.End or touch.UserInputState == Enum.UserInputState.Cancel then
-						conn:Disconnect()
-						KW.heldHudButtons[abilityName] = nil
-						KW.popHeldKey(abilityName)
-						sendRelease(abilityName, false)
-					end
-				end)
+				beginHudButtonHold(rec.abilityName, touch)
 				break
 			end
 		end
