@@ -575,7 +575,7 @@ function KW.clearAllHeldKeys()
 	if KW.dispatchedHeldKeys then table.clear(KW.dispatchedHeldKeys) end
 	currentSpamKey = nil
 	currentSpamKeyCode = nil
-	if updateSpamVisuals then pcall(updateSpamVisuals) end
+	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and updateSpamVisuals then pcall(updateSpamVisuals) end
 end
 
 -- ============================================================================
@@ -1491,6 +1491,17 @@ if isNewFender and AbilityUtilities and AbilityUtilities.GetObjectNearMouse then
 			if not isOutspammerActive then
 				return nil
 			end
+		end
+
+		if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+			local autoObj = nearestGrabObj or nearestWorldObj
+			if autoObj then
+				if autoObj:IsA("Model") and autoObj:FindFirstChildOfClass("Humanoid") then
+					currentLockedChar = autoObj
+				end
+				return autoObj
+			end
+			return nil
 		end
 
 		local bestObj, bestScreenDist = nil, math.huge
@@ -5300,6 +5311,7 @@ local function isAbilityOnCooldown(key)
 	return false
 end
 
+local isMobileOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 local function executeSingleSpamTick(key)
 	if isHoldingTelekinesis() or isShieldActive() or pauseReason() then
 		return
@@ -5374,12 +5386,50 @@ local function executeSingleSpamTick(key)
 
 		KW.installControllerHooks()
 		local btn = getHudButtonForKey(key)
-		if string.find(key, "ExtraKey", 1, true) and AbilityController._pressExtra then
-			task.spawn(AbilityController._pressExtra, btn, key)
-		elseif AbilityController._keyDown then
-			task.spawn(AbilityController._keyDown, btn, key)
-		elseif AbilityController.KeyDown then
-			pcall(function() AbilityController.KeyDown:Fire(btn, key) end)
+		if isMobileOnly then
+			if not KW.mobileCanRunHooked and type(AbilityController.CanRunAbilities) == "function" then
+				KW.mobileCanRunHooked = true
+				local origCanRun = AbilityController.CanRunAbilities
+				AbilityController.CanRunAbilities = function(self, abMod, keyName, ...)
+					local ok, cur = origCanRun(self, abMod, keyName, ...)
+					if not ok and KW.mobileSpamBypassRagdoll then
+						local char = LocalPlayer.Character
+						local hum = char and char:FindFirstChildOfClass("Humanoid")
+						local rag = char and char:GetAttribute("Ragdoll")
+						if hum and hum.Health > 0 and rag and rag > 0 then
+							if not (state.respectCooldowns and isAbilityOnCooldown(keyName)) then
+								return true, cur
+							end
+						end
+					end
+					return ok, cur
+				end
+			end
+			local safeBtn = (btn and btn:FindFirstChild("Cooldown")) and btn or nil
+			local function runMobileDispatch(fn, bArg)
+				KW.mobileSpamBypassRagdoll = (KW.heldHudButtons[key] == true)
+				pcall(fn, bArg, key)
+				KW.mobileSpamBypassRagdoll = false
+			end
+			if string.find(key, "ExtraKey", 1, true) and AbilityController._pressExtra then
+				if safeBtn then
+					task.spawn(runMobileDispatch, AbilityController._pressExtra, safeBtn)
+				elseif AbilityController._keyDown then
+					task.spawn(runMobileDispatch, AbilityController._keyDown, nil)
+				end
+			elseif AbilityController._keyDown then
+				task.spawn(runMobileDispatch, AbilityController._keyDown, safeBtn)
+			elseif AbilityController.KeyDown then
+				pcall(function() AbilityController.KeyDown:Fire(safeBtn, key) end)
+			end
+		else
+			if string.find(key, "ExtraKey", 1, true) and AbilityController._pressExtra then
+				task.spawn(AbilityController._pressExtra, btn, key)
+			elseif AbilityController._keyDown then
+				task.spawn(AbilityController._keyDown, btn, key)
+			elseif AbilityController.KeyDown then
+				pcall(function() AbilityController.KeyDown:Fire(btn, key) end)
+			end
 		end
 		task.defer(confirmActiveAbilityListener)
 	elseif isHorizon then
@@ -5483,7 +5533,7 @@ trackConn(RunService.RenderStepped:Connect(function()
 		end
 	end
 	KW.syncActiveHeldKey()
-	updateSpamVisuals()
+	if isMobileOnly and type(updateSpamVisuals) == "function" then updateSpamVisuals() end
 	local now = os.clock()
 	local interval = (state.maxSpeed or (state.cps and state.cps >= 300)) and 0 or (1 / math.max(state.cps or 300, 1))
 	local kbSpamming = state.outspammer and currentSpamKey and state.spamKeys[currentSpamKey] and currentSpamKey ~= "Fly" and currentSpamKey ~= "Q"
@@ -5514,6 +5564,50 @@ trackConn(RunService.RenderStepped:Connect(function()
 			KW.lastHudSpamTime = now
 		end
 	end
+	-- 3b. Mobile-only: while holding an ability button, aim at nearest world target & repeatedly fire input clicks
+	if isMobileOnly and state.outspammer and next(KW.heldHudButtons) ~= nil then
+		local myChar = LocalPlayer.Character
+		local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+		local cam = workspace.CurrentCamera
+		if myHrp and cam then
+			local maxRange = (state.customRangeEnabled and (tonumber(state.customRangeDistance) or 0) > 0)
+				and tonumber(state.customRangeDistance)
+				or 1200
+			local nearestChar, nearestDist = nil, math.huge
+			for _, p in ipairs(Players:GetPlayers()) do
+				local c = p ~= LocalPlayer and p.Character
+				if c and c.PrimaryPart
+					and not c:GetAttribute("NoClickTarget")
+					and not c:GetAttribute("FakeDead")
+					and not c:GetAttribute("EmmaAstralBody")
+					and not (state.excludeFriends and isFriend(c))
+					and not (AbilityUtilities and AbilityUtilities.Died and AbilityUtilities:Died(c))
+				then
+					local hum = c:FindFirstChildOfClass("Humanoid")
+					if hum and hum.Health > 0 and not c:GetAttribute("Inmortal") then
+						local d = (c.PrimaryPart.Position - myHrp.Position).Magnitude
+						if d <= maxRange and d < nearestDist then
+							nearestDist = d
+							nearestChar = c
+						end
+					end
+				end
+			end
+			if nearestChar then
+				KW.lastVisualBestTarget = nearestChar
+				if KW.syncM1ProjectileAim then
+					KW.syncM1ProjectileAim(nearestChar, myHrp, cam, true)
+				end
+			end
+		end
+		if (now - (KW.lastMobileClickTime or 0)) >= interval then
+			KW.lastMobileClickTime = now
+			if isNewFender and hasActiveTargetingListener() then
+				confirmActiveAbilityListener()
+			end
+			pumpFastClick()
+		end
+	end
 	if state.mouse1Down and state.spamM1 then
 		local m1Interval = 1 / math.max(state.cps or 300, 1)
 		if (now - KW.lastM1ClickTime) >= m1Interval then
@@ -5522,10 +5616,10 @@ trackConn(RunService.RenderStepped:Connect(function()
 		end
 	end
 end))
--- On-screen HUD button hooks: track held state, exact-shape SPAM ring + bottom SPAM pill, and hold-while-ragdolled
+-- On-screen HUD button hooks: PC left untouched; Mobile gets MobileKeys + exact-shape SPAM ring + bottom SPAM pill
 local hookedHudContainers = setmetatable({}, { __mode = "k" })
-local registeredHudButtons = {} -- list of { abilityName = string, btn = GuiObject, visualTarget = GuiObject }
-local spamVisualsByKey = {} -- [abilityName] = { { ring = GuiObject, outer = GuiObject, pill = Frame }, ... }
+local registeredMobileButtons = {}
+local spamVisualsByKey = {}
 local activeTouchInputs = setmetatable({}, { __mode = "k" })
 
 local function isGuiActuallyVisible(gui)
@@ -5542,7 +5636,7 @@ local function isGuiActuallyVisible(gui)
 end
 
 local function ensureSpamVisual(visualTarget, abilityName)
-	if not visualTarget or not visualTarget:IsA("GuiObject") then return nil end
+	if not isMobileOnly or not visualTarget or not visualTarget:IsA("GuiObject") then return nil end
 	local existingRing = visualTarget:FindFirstChild("KW_SpamRing")
 	local existingOuter = visualTarget:FindFirstChild("KW_SpamRingOuter")
 	local existingPill = visualTarget:FindFirstChild("KW_SpamPill")
@@ -5555,7 +5649,6 @@ local function ensureSpamVisual(visualTarget, abilityName)
 	local ring, outer
 
 	if not corner and (visualTarget:IsA("ImageButton") or visualTarget:IsA("ImageLabel")) and visualTarget.Image ~= "" then
-		-- Exact silhouette ring for custom shapes (e.g. hexagon buttons in New Fender)
 		ring = Instance.new("ImageLabel")
 		ring.Name = "KW_SpamRing"
 		ring.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -5584,7 +5677,6 @@ local function ensureSpamVisual(visualTarget, abilityName)
 		outer.Visible = false
 		outer.Parent = visualTarget
 	else
-		-- Exact UIStroke ring matching UICorner shape (e.g. circles in MobileKeys / Heroes)
 		local cornerRadius = corner and corner.CornerRadius or UDim.new(1, 0)
 		ring = Instance.new("Frame")
 		ring.Name = "KW_SpamRing"
@@ -5623,7 +5715,6 @@ local function ensureSpamVisual(visualTarget, abilityName)
 		outer.Parent = visualTarget
 	end
 
-	-- Bottom "SPAM" pill indicator
 	local pill = Instance.new("Frame")
 	pill.Name = "KW_SpamPill"
 	pill.AnchorPoint = Vector2.new(0.5, 0)
@@ -5654,10 +5745,11 @@ local function ensureSpamVisual(visualTarget, abilityName)
 	return entry
 end
 
-local function updateSpamVisuals()
+updateSpamVisuals = function()
+	if not isMobileOnly then return end
 	for abilityName, entries in pairs(spamVisualsByKey) do
 		local active = state.outspammer and abilityName ~= "Fly" and abilityName ~= "Q"
-			and (KW.heldHudButtons[abilityName] == true or heldKeys[abilityName] ~= nil)
+			and (KW.heldHudButtons[abilityName] == true)
 		for i = #entries, 1, -1 do
 			local e = entries[i]
 			if not e.ring or not e.ring.Parent then
@@ -5671,8 +5763,8 @@ local function updateSpamVisuals()
 	end
 end
 
-local function beginHudButtonHold(abilityName, input)
-	if not abilityName or activeTouchInputs[input] then return end
+local function beginMobileButtonHold(abilityName, input)
+	if not isMobileOnly or not abilityName or activeTouchInputs[input] then return end
 	activeTouchInputs[input] = true
 	local now = os.clock()
 	KW.heldHudButtons[abilityName] = true
@@ -5693,30 +5785,22 @@ local function beginHudButtonHold(abilityName, input)
 	end)
 end
 
-local function registerHudAbilityButton(btn, abilityName, visualTarget)
-	if not btn or not btn:IsA("GuiObject") then return end
-	if not abilityName or abilityName == "" or abilityName == "Button" then return end
-	visualTarget = visualTarget or btn
-	ensureSpamVisual(visualTarget, abilityName)
-	table.insert(registeredHudButtons, { abilityName = abilityName, btn = btn, visualTarget = visualTarget })
-	if KW.hudHooked[btn] then return end
-	KW.hudHooked[btn] = true
-	trackConn(btn.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-			beginHudButtonHold(abilityName, input)
-		end
-	end))
-end
-
-local function hookHudContainer(container, isMobileIcons)
-	if not container then return end
+local function hookMobileContainer(container, isMobileIcons)
+	if not isMobileOnly or not container then return end
 	local function handleChild(child)
 		if not child:IsA("GuiObject") then return end
-		if isMobileIcons then
-			local btn = child:FindFirstChild("Button") or child
-			registerHudAbilityButton(btn, child.Name, child)
-		else
-			registerHudAbilityButton(child, child.Name, child)
+		local abilityName = child.Name
+		if not abilityName or abilityName == "" or abilityName == "Button" then return end
+		local btn = isMobileIcons and (child:FindFirstChild("Button") or child) or child
+		ensureSpamVisual(child, abilityName)
+		table.insert(registeredMobileButtons, { abilityName = abilityName, btn = btn })
+		if not KW.hudHooked[btn] then
+			KW.hudHooked[btn] = true
+			trackConn(btn.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.Touch then
+					beginMobileButtonHold(abilityName, input)
+				end
+			end))
 		end
 	end
 	for _, child in ipairs(container:GetChildren()) do
@@ -5731,45 +5815,82 @@ end
 local function hookHudButtons()
 	pcall(KW.fixHeroesUI)
 	if not isNewFender then return end
-	table.clear(registeredHudButtons)
 	local profile = getAuthoritativeProfile()
 	if not profile then return end
-	hookHudContainer(profile:FindFirstChild("TemplateKeysHolder") or profile:FindFirstChild("KeysHolder"), false)
-	hookHudContainer(profile:FindFirstChild("TemplateExtraKeysHolder") or profile:FindFirstChild("ExtraKeysHolder"), false)
-	local mk = profile:FindFirstChild("MobileKeys", true)
-	if mk then
-		hookHudContainer(mk:FindFirstChild("AbilityIcons") or mk, true)
+	if isMobileOnly then
+		table.clear(registeredMobileButtons)
+		hookMobileContainer(profile:FindFirstChild("TemplateKeysHolder") or profile:FindFirstChild("KeysHolder"), false)
+		hookMobileContainer(profile:FindFirstChild("TemplateExtraKeysHolder") or profile:FindFirstChild("ExtraKeysHolder"), false)
+		local mk = profile:FindFirstChild("MobileKeys", true)
+		if mk then
+			hookMobileContainer(mk:FindFirstChild("AbilityIcons") or mk, true)
+		end
+		if not hookedHudContainers[profile] then
+			hookedHudContainers[profile] = true
+			trackConn(profile.ChildAdded:Connect(function(child)
+				if child.Name == "TemplateKeysHolder" or child.Name == "KeysHolder"
+					or child.Name == "TemplateExtraKeysHolder" or child.Name == "ExtraKeysHolder"
+					or child.Name == "MobileKeys" then
+					task.defer(hookHudButtons)
+				end
+			end))
+		end
+		return
 	end
-	if not hookedHudContainers[profile] then
-		hookedHudContainers[profile] = true
-		trackConn(profile.ChildAdded:Connect(function(child)
-			if child.Name == "TemplateKeysHolder" or child.Name == "KeysHolder"
-				or child.Name == "TemplateExtraKeysHolder" or child.Name == "ExtraKeysHolder"
-				or child.Name == "MobileKeys" then
-				task.defer(hookHudButtons)
-			end
-		end))
-	end
-end
-
--- Touch hit-test fallback so holding a visible mobile ability button works even when Cooldown/Ragdoll overlay covers it
-trackConn(UserInputService.TouchStarted:Connect(function(touch)
-	if not isNewFender or not state.outspammer or activeTouchInputs[touch] then return end
-	local pos = touch.Position
-	for _, rec in ipairs(registeredHudButtons) do
-		local btn = rec.btn
-		if btn and btn.Parent and isGuiActuallyVisible(btn) then
-			local ap = btn.AbsolutePosition
-			local as = btn.AbsoluteSize
-			if as.X > 0 and as.Y > 0
-				and pos.X >= ap.X and pos.X <= (ap.X + as.X)
-				and pos.Y >= ap.Y and pos.Y <= (ap.Y + as.Y) then
-				beginHudButtonHold(rec.abilityName, touch)
-				break
+	-- Original PC HUD button hook (unchanged)
+	local holders = {
+		profile:FindFirstChild("TemplateKeysHolder") or profile:FindFirstChild("KeysHolder"),
+		profile:FindFirstChild("TemplateExtraKeysHolder") or profile:FindFirstChild("ExtraKeysHolder"),
+	}
+	for _, holder in ipairs(holders) do
+		if holder then
+			for _, btn in ipairs(holder:GetChildren()) do
+				if btn:IsA("GuiObject") and not KW.hudHooked[btn] then
+					KW.hudHooked[btn] = true
+					local abilityName = btn.Name
+					trackConn(btn.InputBegan:Connect(function(input)
+						if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+							local now = os.clock()
+							KW.heldHudButtons[abilityName] = true
+							KW.keyPressedAt[abilityName] = now
+							KW.recentSpamConfirmUntil = now + 0.2
+							KW.pushHeldKey(abilityName, true)
+							local conn
+							conn = input:GetPropertyChangedSignal("UserInputState"):Connect(function()
+								if input.UserInputState == Enum.UserInputState.End or input.UserInputState == Enum.UserInputState.Cancel then
+									conn:Disconnect()
+									KW.heldHudButtons[abilityName] = nil
+									KW.popHeldKey(abilityName)
+									sendRelease(abilityName, false)
+								end
+							end)
+						end
+					end))
+				end
 			end
 		end
 	end
-end))
+end
+
+if isMobileOnly then
+	trackConn(UserInputService.TouchStarted:Connect(function(touch)
+		if not isNewFender or not state.outspammer or activeTouchInputs[touch] then return end
+		local pos = touch.Position
+		for _, rec in ipairs(registeredMobileButtons) do
+			local btn = rec.btn
+			if btn and btn.Parent and isGuiActuallyVisible(btn) then
+				local ap = btn.AbsolutePosition
+				local as = btn.AbsoluteSize
+				if as.X > 0 and as.Y > 0
+					and pos.X >= ap.X and pos.X <= (ap.X + as.X)
+					and pos.Y >= ap.Y and pos.Y <= (ap.Y + as.Y) then
+					beginMobileButtonHold(rec.abilityName, touch)
+					break
+				end
+			end
+		end
+	end))
+end
 
 task.defer(function()
 	pcall(KW.fixHeroesUI)
@@ -5780,7 +5901,7 @@ task.defer(function()
 		if prof then
 			trackConn(prof:GetPropertyChangedSignal("Enabled"):Connect(function()
 				if prof.Enabled then
-					task.delay(0.2, KW.fixHeroesUI)
+					if type(KW.fixHeroesUI) == "function" then task.delay(0.2, KW.fixHeroesUI) end
 				end
 			end))
 		end
@@ -5842,7 +5963,9 @@ updateVisuals = function()
 					if data then
 						if data.gui.Adornee ~= hrp then data.gui.Adornee = hrp end
 						data.gui.Enabled = true
-						local col = state.espPowerColor and getCharacterPowerColor(c) or WHITE
+						local friend = isFriend(p)
+						local friendCol = Color3.fromRGB(74, 222, 128)
+						local col = friend and friendCol or (state.espPowerColor and getCharacterPowerColor(c) or WHITE)
 						data.name.Text = getPlayerCharacterName(p, c)
 						data.name.TextColor3 = col
 						local parts = { p.DisplayName or p.Name }
@@ -5913,17 +6036,27 @@ updateVisuals = function()
 				end
 			end
 		end
-		local hovered = KW.raycastModelUnderMouse and KW.raycastModelUnderMouse(cam, mouseVec, myChar, candSet)
-		if hovered then
-			bestTarget = hovered
-		else
+		if isMobileOnly then
 			for _, c in ipairs(cands) do
 				local worldDist = (c.PrimaryPart.Position - myHrp.Position).Magnitude
-				if worldDist <= maxWorldDist then
-					local sDist = KW.getModelCursorDist and KW.getModelCursorDist(cam, mouseVec, c) or math.huge
-					if sDist <= 95 and sDist < bestDist then
-						bestDist = sDist
-						bestTarget = c
+				if worldDist <= maxWorldDist and worldDist < bestDist then
+					bestDist = worldDist
+					bestTarget = c
+				end
+			end
+		else
+			local hovered = KW.raycastModelUnderMouse and KW.raycastModelUnderMouse(cam, mouseVec, myChar, candSet)
+			if hovered then
+				bestTarget = hovered
+			else
+				for _, c in ipairs(cands) do
+					local worldDist = (c.PrimaryPart.Position - myHrp.Position).Magnitude
+					if worldDist <= maxWorldDist then
+						local sDist = KW.getModelCursorDist and KW.getModelCursorDist(cam, mouseVec, c) or math.huge
+						if sDist <= 95 and sDist < bestDist then
+							bestDist = sDist
+							bestTarget = c
+						end
 					end
 				end
 			end
