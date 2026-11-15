@@ -292,8 +292,8 @@ local state = {
 	ownAllCharacters = false,      -- Unlock all characters in menu toggle
 	killAutofarm = false,          -- Kill Autofarm master toggle
 	killFarmLocation = "Same Spot",-- Target farm location ("Same Spot", "Spawn", or any Dimension)
-	autoDieOnHit = true,           -- Auto die when hit while Kill Autofarm is active
-	autoSpawnNewChar = true,       -- Auto spawn as a new character after dying
+	autoDieOnHit = false,          -- Auto die when hit while Kill Autofarm is active
+	autoSpawnNewChar = false,      -- Auto spawn as same character after dying
 	spamKeys = {},
 	customRangeEnabled = isNewFender,
 	customRangeDistance = 150,
@@ -3019,6 +3019,12 @@ local function initInterface()
 				if state.killAutofarm and KW.teleportToFarmLocation then
 					KW.teleportToFarmLocation(v)
 				end
+			end)
+			toggle(combatPage, "Auto Die on Hit", "Automatically dies when hit/damaged while Kill Autofarm is enabled.", state.autoDieOnHit, function(v)
+				state.autoDieOnHit = v
+			end)
+			toggle(combatPage, "Auto Respawn Same Character", "Automatically respawns as the same character and returns to your Farm Location.", state.autoSpawnNewChar, function(v)
+				state.autoSpawnNewChar = v
 			end)
 		end
 	end
@@ -7026,38 +7032,43 @@ do
 		local hrp = c and c:FindFirstChild("HumanoidRootPart")
 		local hum = c and c:FindFirstChildOfClass("Humanoid")
 
-		-- 1. Auto Spawn Same Character once DeathService.GoToSelection fires (or 5.4s fallback)
+		-- 1. Auto Respawn Same Character once DeathService.GoToSelection fires (or 5.4s fallback)
 		if not c or not c.Parent or not hrp or not hum or hum.Health <= 0 then
-			local waited = now - (KW.killFarmDiedAt or 0)
-			if (KW.killFarmCanSpawn or waited >= 5.4) and (now - (KW.lastAutoSpawnAt or 0)) >= 0.5 then
+			if not KW.killFarmDiedAt then KW.killFarmDiedAt = now end
+			local waited = now - KW.killFarmDiedAt
+			if state.autoSpawnNewChar and (KW.killFarmCanSpawn or waited >= 5.4) and (now - (KW.lastAutoSpawnAt or 0)) >= 0.5 then
 				KW.lastAutoSpawnAt = now
 				KW.spawnNewCharacter(KW.killFarmLastDiedCharName)
 			end
 			return
 		end
 
+		KW.killFarmDiedAt = nil
+		KW.killFarmDeathCF = hrp.CFrame
+		KW.killFarmLastDiedCharName = c:GetAttribute("NameTag") or KW.killFarmLastDiedCharName
+
 		-- 2. Auto Die on Hit (waits 0.15s for server damage tag, then sets Health = 0 cleanly like Reset)
-		if KW.killFarmLastChar ~= c then
-			KW.killFarmLastChar = c
-			KW.killFarmLastHp = hum.Health
-		elseif KW.killFarmDyingChar ~= c then
-			local prevHp = KW.killFarmLastHp or hum.Health
-			local damagedAttr = tonumber(c:GetAttribute("Damaged")) or 0
-			if hum.Health < (prevHp - 0.1) or (damagedAttr > 0 and hum.Health < hum.MaxHealth) then
-				KW.killFarmDyingChar = c
-				KW.killFarmDeathCF = hrp.CFrame
-				KW.killFarmLastDiedCharName = c:GetAttribute("NameTag") or KW.killFarmLastDiedCharName
-				KW.killFarmDiedAt = now
-				KW.killFarmCanSpawn = false
-				task.delay(0.15, function()
-					if state.killAutofarm and LocalPlayer.Character == c and hum.Parent then
-						KW.killFarmDiedAt = os.clock()
-						hum.Health = 0
-					end
-				end)
-				return
+		if state.autoDieOnHit then
+			if KW.killFarmLastChar ~= c then
+				KW.killFarmLastChar = c
+				KW.killFarmLastHp = hum.Health
+			elseif KW.killFarmDyingChar ~= c then
+				local prevHp = KW.killFarmLastHp or hum.Health
+				local damagedAttr = tonumber(c:GetAttribute("Damaged")) or 0
+				if hum.Health < (prevHp - 0.1) or (damagedAttr > 0 and hum.Health < hum.MaxHealth) then
+					KW.killFarmDyingChar = c
+					KW.killFarmDiedAt = now
+					KW.killFarmCanSpawn = false
+					task.delay(0.15, function()
+						if state.killAutofarm and state.autoDieOnHit and LocalPlayer.Character == c and hum.Parent then
+							KW.killFarmDiedAt = os.clock()
+							hum.Health = 0
+						end
+					end)
+					return
+				end
+				KW.killFarmLastHp = hum.Health
 			end
-			KW.killFarmLastHp = hum.Health
 		end
 	end))
 
