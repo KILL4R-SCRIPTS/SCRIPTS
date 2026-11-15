@@ -2084,6 +2084,22 @@ local createPlayerEsp, clearPlayerEsp, clearWorldObjectEsp, scanAndTrackWorldObj
 local statusSetters, rebindButton, listeningForKey = nil, nil, false
 
 -- ============================================================================
+KW.getAllDimensionNames = function()
+	local list = { "Pendant", "Descensum", "Ghost Place", "EmmaFrostPlace", "AgathaPlace", "ArgosPlace", "MayuraPlace" }
+	local seen = { Pendant = true, PendantTrap = true, Descensum = true, ["Ghost Place"] = true, GhostPlace = true, EmmaFrostPlace = true, AgathaPlace = true, ArgosPlace = true, MayuraPlace = true }
+	local map = workspace:FindFirstChild("Map")
+	local dim = map and map:FindFirstChild("Dimension")
+	if dim then
+		for _, child in ipairs(dim:GetChildren()) do
+			if (child:IsA("Model") or child:IsA("Folder")) and not seen[child.Name] then
+				seen[child.Name] = true
+				table.insert(list, child.Name)
+			end
+		end
+	end
+	return list
+end
+
 local function initInterface()
 	pcall(function()
 		if type(gethui) == "function" then
@@ -6737,21 +6753,7 @@ do
 		return nil
 	end
 
-	KW.getAllDimensionNames = function()
-		local list = { "Pendant", "Descensum", "Ghost Place" }
-		local seen = { Pendant = true, PendantTrap = true, Descensum = true, ["Ghost Place"] = true, GhostPlace = true }
-		local map = workspace:FindFirstChild("Map")
-		local dim = map and map:FindFirstChild("Dimension")
-		if dim then
-			for _, child in ipairs(dim:GetChildren()) do
-				if (child:IsA("Model") or child:IsA("Folder")) and not seen[child.Name] then
-					seen[child.Name] = true
-					table.insert(list, child.Name)
-				end
-			end
-		end
-		return list
-	end
+
 
 	KW.teleportToRegularSpawn = function()
 		local c = LocalPlayer.Character
