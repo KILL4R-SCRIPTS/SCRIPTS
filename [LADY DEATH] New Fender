@@ -26,19 +26,24 @@ if _G.NetherwareCleanup then pcall(_G.NetherwareCleanup) _G.NetherwareCleanup = 
 local PLACE_NEW_FENDER = 119504692460642
 local PLACE_HEROES_ONLINE_WORLD = 100826958521689
 local GAME_ID_HEROES_ONLINE_WORLD = 7386897403
+local PLACE_REALMS_OF_MULTIVERSE = 82044732002384
+local GAME_ID_REALMS_OF_MULTIVERSE = 10776214003
 local PLACE_HORIZON = 13408179371
 local Modules = ReplicatedStorage:FindFirstChild("Modules")
 local Library = ReplicatedStorage:FindFirstChild("Library")
 local isNewFenderGame = (game.PlaceId == PLACE_NEW_FENDER)
 local isHeroesOnlineWorld = (game.PlaceId == PLACE_HEROES_ONLINE_WORLD) or (game.GameId == GAME_ID_HEROES_ONLINE_WORLD)
+local isRealmsOfMultiverse = (game.PlaceId == PLACE_REALMS_OF_MULTIVERSE) or (game.GameId == GAME_ID_REALMS_OF_MULTIVERSE)
 local hasKnit = not not ((Modules and Modules:FindFirstChild("Knit") ~= nil)
 	or (ReplicatedStorage:FindFirstChild("Knit") ~= nil))
 local hasNFCharacters = not not (Modules and Modules:FindFirstChild("Characters") ~= nil)
--- Both New Fender and Heroes: Online World share the same Knit / AbilityController / Characters combat engine
-local isHeroGame = isNewFenderGame or isHeroesOnlineWorld or (hasKnit and hasNFCharacters)
-local isNewFender = isHeroGame -- Backwards-compatible alias so all combat, outspammer, targeting & HUD hooks apply to both games
-local isHorizon = (not isHeroGame) and ((game.PlaceId == PLACE_HORIZON) or (Library ~= nil and Library:FindFirstChild("Data") ~= nil))
-local gameTitle = isNewFenderGame and "New Fender" or (isHeroesOnlineWorld and "Heroes: Online World" or (isHorizon and "Horizon: New Adventures" or (isHeroGame and "Hero Combat" or "Universal")))
+-- Combat engine support: New Fender, Heroes: Online World, and Realms Of The Multiverse
+local isCombatGame = isNewFenderGame or isHeroesOnlineWorld or isRealmsOfMultiverse or (hasKnit and hasNFCharacters)
+local isNewFender = isNewFenderGame or isHeroesOnlineWorld or (hasKnit and hasNFCharacters)
+local isHeroGame = isCombatGame
+local isHorizon = (not isCombatGame) and ((game.PlaceId == PLACE_HORIZON) or (Library ~= nil and Library:FindFirstChild("Data") ~= nil))
+local gameTitle = isNewFenderGame and "New Fender" or (isHeroesOnlineWorld and "Heroes: Online World" or (isRealmsOfMultiverse and "Realms Of The Multiverse" or (isHorizon and "Horizon: New Adventures" or (isCombatGame and "Hero Combat" or "Universal"))))
+local gameWatermarkTag = isHeroesOnlineWorld and "HOW" or (isRealmsOfMultiverse and "ROTM" or (isNewFenderGame and "NF" or (isHorizon and "HZN" or "UNI")))
 
 -- ============================================================================
 -- TRACKING HELPERS
@@ -283,10 +288,8 @@ local state = {
 	autoEscapePendant = true,      -- Auto-escape Pendant Trap when trapped by Freya
 	antiSummon = true,             -- Anti-Summon toggle (ON by default)
 	alwaysAllowReset = true,       -- Always Allow Reset in Esc menu (ON by default)
-	bypassContractLimit = true,    -- Bypass The Death contract 1-per-life limitation!
 	fpsBooster = false,            -- FPS booster toggle
 	ownAllCharacters = false,      -- Unlock all characters in menu toggle
-	candyAutofarm = false,         -- Background candy / pumpkin autofarm!
 	spamKeys = {},
 	customRangeEnabled = isNewFender,
 	customRangeDistance = 150,
@@ -310,7 +313,7 @@ local state = {
 	espChamsFill = 0.75,           -- 75% clear!
 	espShowHp = true,              -- Automatically ON when player esp is ON
 	espShowDist = true,            -- Automatically ON when player esp is ON
-	espMaxDist = 3000,
+	espMaxDist = math.huge,
 	totemEsp = false,
 	nearestTargetMode = false,
 	rangeMultiplier = 1,
@@ -319,6 +322,7 @@ local state = {
 	mouse1Down = false,
 	inSafeSpot = false,
 	returnCFrame = nil,
+	privateAreaStyle = "Death's Palace", -- "Death's Palace", "Royal Palace", "Valak Palace"
 	instantRituals = true,
 	toggleKey = Enum.KeyCode.LeftControl,
 	accentName = "Violet",
@@ -382,20 +386,60 @@ function KW.markIntentionalTp(dur)
 end
 
 function KW.isVictimTrappedInPendant()
-	if KW.ek5Role == "caster" then return false end
+	if not isNewFenderGame then return false end
+	local c = LocalPlayer.Character
+	if not c then return false end
+
+	-- 0. Absolute exclusion: Davina / Harvest Witch / Harvest Cheerleader uses Soul Bind (her 3rd key)
+	-- Davina NEVER uses Freya's pendant trap and can NEVER be teleported to the Red Door!
+	local nt = tostring(c:GetAttribute("NameTag") or c:GetAttribute("Name") or c:GetAttribute("DisplayTag") or ""):lower()
+	if nt:find("harvest", 1, true) or nt:find("davina", 1, true) then
+		return false
+	end
+
+	-- 1. Never victim if local player is the caster or recently cast Freya ExtraKey5
+	if KW.ek5Role == "caster" or (KW.ek5CasterActiveUntil and os.clock() < KW.ek5CasterActiveUntil) then
+		return false
+	end
 	if (KW.ek5EndedAt or 0) > (KW.ek5StartedAt or 0) and (os.clock() - KW.ek5EndedAt) < 2.0 then
 		return false
 	end
+
+	-- 2. Physical location check: ONLY consider trapped if character is physically inside PendantTrap dimension!
+	local hrp = c:FindFirstChild("HumanoidRootPart")
+	if not hrp then return false end
+
+	local ws = game:GetService("Workspace")
+	local map = ws:FindFirstChild("Map")
+	local dim = map and map:FindFirstChild("Dimension")
+	local pt = dim and dim:FindFirstChild("PendantTrap")
+	local ptPos = (pt and pt:GetPivot().Position) or Vector3.new(1081.49, 120.57, -1089.62)
+
+	-- If character is further than 180 studs from PendantTrap center, they CANNOT be inside the pendant!
+	if (hrp.Position - ptPos).Magnitude > 180 then
+		return false
+	end
+
+	-- 3. Inside PendantTrap, verify victim markers (never generic SoulGui alone)
+	if _G.BonnieExtraKey5VictimActive == true then
+		return true
+	end
 	local pgui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-	if pgui and pgui:FindFirstChild("SoulGui") then
+	if pgui and (pgui:FindFirstChild("LostSisterEK5Movie") or pgui:FindFirstChild("BonnieExtraKey5White")) then
 		return true
 	end
-	if KW.ek5Role == "victim" and KW.ek5VictimArrived then
+	if KW.ek5Role == "victim" and (KW.ek5VictimArrived or KW.ek5VictimActive) then
 		return true
 	end
-	if KW.ek5VictimActive and KW.ek5VictimArrived and pgui and pgui:FindFirstChild("LostSisterEK5Movie") then
+
+	-- 4. If physically inside PendantTrap and not caster, any proximity prompt on RedDoor confirms victim state
+	local redDoor = (pt and pt:FindFirstChild("Doors") and pt.Doors:FindFirstChild("RedDoor"))
+		or (pt and pt:FindFirstChild("RedDoor", true))
+		or ws:FindFirstChild("RedDoor", true)
+	if redDoor and redDoor:FindFirstChildWhichIsA("ProximityPrompt", true) then
 		return true
 	end
+
 	return false
 end
 
@@ -495,6 +539,9 @@ function KW.syncActiveHeldKey()
 	currentSpamKey = topKey
 	local kc = topKey and heldKeys[topKey] or nil
 	currentSpamKeyCode = (typeof(kc) == "EnumItem") and kc or nil
+	if KW.updateSpamHudIndicator then
+		KW.updateSpamHudIndicator(currentSpamKey)
+	end
 end
 
 function KW.pushHeldKey(abilityName, keyCodeOrTrue)
@@ -531,87 +578,7 @@ function KW.clearAllHeldKeys()
 end
 
 -- ============================================================================
--- THE DEATH CONTRACT LIMIT BYPASS (Client gate + cooldown bypass; note server also validates contracts)
-
--- ============================================================================
-task.defer(function()
-	pcall(function()
-		local controllers = LocalPlayer:WaitForChild("PlayerScripts", 10):WaitForChild("Client", 10):WaitForChild("Controllers", 10)
-		local abilityCtrlMod = controllers:WaitForChild("AbilityController", 10)
-		local okAc, acTbl = pcall(require, abilityCtrlMod)
-		local rvMod = abilityCtrlMod and abilityCtrlMod:FindFirstChild("RioVidal")
-		local function clearClientContractAndCd()
-			local c = LocalPlayer.Character
-			if c then
-				pcall(function() c:SetAttribute("RioContract", nil) end)
-			end
-			if okAc and type(acTbl) == "table" then
-				pcall(function()
-					if type(acTbl.Cooldowns) == "table" then
-						acTbl.Cooldowns.ExtraKey2 = nil
-					end
-					if type(acTbl.StartCooldown) == "function" and debug and debug.getupvalues then
-						local ups = debug.getupvalues(acTbl.StartCooldown)
-						if type(ups) == "table" and type(ups[4]) == "table" then
-							ups[4].ExtraKey2 = nil
-						end
-					end
-				end)
-			end
-			pcall(function()
-				local prof = PlayerGui:FindFirstChild("Profile")
-				if prof then
-					for _, holderName in ipairs({ "ExtraKeysHolder", "TemplateExtraKeysHolder" }) do
-						local h = prof:FindFirstChild(holderName)
-						local ek2 = h and h:FindFirstChild("ExtraKey2")
-						if ek2 and ek2:FindFirstChild("Cooldown") then
-							ek2.Cooldown.Visible = false
-						end
-					end
-				end
-			end)
-		end
-		if rvMod then
-			local rv = require(rvMod)
-			if rv and rv.AbilityFunctions and rv.AbilityFunctions.ExtraKey2 then
-				local rawE2 = rv.AbilityFunctions._kwOrigExtraKey2 or rv.AbilityFunctions.ExtraKey2
-				if debug and debug.getinfo and debug.getupvalues then
-					for _ = 1, 10 do
-						local src = tostring(debug.getinfo(rawE2).short_src or "")
-						if src:find("RioVidal", 1, true) then break end
-						local okU, ups = pcall(debug.getupvalues, rawE2)
-						if okU and type(ups) == "table" and type(ups[3]) == "function" then
-							rawE2 = ups[3]
-						else
-							break
-						end
-					end
-				end
-				rv.AbilityFunctions._kwOrigExtraKey2 = rawE2
-				rv.AbilityFunctions.ExtraKey2 = function(...)
-					if state.bypassContractLimit then
-						clearClientContractAndCd()
-					end
-					return rawE2(...)
-				end
-			end
-		end
-		if okAc and type(acTbl) == "table" and type(acTbl.CanRunAbilities) == "function" then
-			local rawCan = acTbl._kwOrigCanRunAbilities or acTbl.CanRunAbilities
-			acTbl._kwOrigCanRunAbilities = rawCan
-			acTbl.CanRunAbilities = function(self, kitTbl, key, ...)
-				if state.bypassContractLimit and key == "ExtraKey2" then
-					clearClientContractAndCd()
-				end
-				return rawCan(self, kitTbl, key, ...)
-			end
-		end
-	end)
-end)
-
--- ============================================================================
 -- STATE DETECTION
-
 -- ============================================================================
 local detect = { telekinesis = false, shield = false }
 local TK_ACTIVE_WELDS = { "GrabWeld", "ChokeWeld", "VictimWeld", "TKWeld" }
@@ -662,13 +629,13 @@ end
 local function computeShield()
 	local c = LocalPlayer.Character
 	if not c then return false end
+	if UserInputService:IsKeyDown(Enum.KeyCode.Q) then return true end
 	if c:GetAttribute("Shield") or c:GetAttribute("Shielding") then return true end
 	if AbilityController and (AbilityController.CurrentAbility == "Q" or AbilityController.Concurrent == "Q") then return true end
 	if c:FindFirstChild("Shield") or c:FindFirstChild("ShieldVFX") or c:FindFirstChild("DefenseShield") then return true end
 	return false
 end
 
--- Flight powers removed per user request
 local lastDetect = 0
 trackConn(RunService.Heartbeat:Connect(function()
 	local now = os.clock()
@@ -684,15 +651,14 @@ local function isHoldingTelekinesis()
 	if not state.safeTelekinesis then return false end
 	local ok, tk = pcall(computeTelekinesis)
 	if ok and tk then return true end
-	return detect.telekinesis
+	return (type(detect) == "table" and detect.telekinesis) or false
 end
 
 local function isShieldActive()
 	if not state.pauseShield then return false end
-	local c = LocalPlayer.Character
-	if UserInputService:IsKeyDown(Enum.KeyCode.Q) then return true end
-	if c and c:GetAttribute("Shielding") == true then return true end
-	return false
+	local ok, sh = pcall(computeShield)
+	if ok and sh then return true end
+	return (type(detect) == "table" and detect.shield) or false
 end
 
 local function isTheDeath(char)
@@ -1069,11 +1035,6 @@ local function confirmActiveAbilityListener()
 	return ok and confirmed or false
 end
 
--- ============================================================================
--- NEW FENDER HELPERS
-
--- ============================================================================
--- (getAuthoritativeProfile defined above in key resolution section)
 local hudButtonCache = {}
 
 local function getHudButtonForKey(key)
@@ -1350,11 +1311,14 @@ if isNewFender and AbilityUtilities and AbilityUtilities.GetPlayerNearMouse then
 			end
 			return nil
 		end
-		-- Enforce ability reach; always prioritize the exact player closest to or under user's mouse cursor
-		local effectiveRange = state.customRangeEnabled
-			and math.max(numMaxDist or 0, tonumber(state.customRangeDistance) or 250)
-			or ((numMaxDist and numMaxDist > 0) and (numMaxDist + 4) or 150)
+		-- Enforce ability reach; always prioritize the exact player under the user's mouse cursor first
+		local effectiveRange = (numMaxDist and numMaxDist > 0) and (numMaxDist + 4) or (state.customRangeDistance or 150)
 		local mouseVec = getMouseVec()
+		local cursorConePx = math.max(
+			85,
+			tonumber(LocalPlayer:GetAttribute("OwnerBuffAim")) or 0,
+			myChar and tonumber(myChar:GetAttribute("OwnerBuffAim")) or 0
+		)
 		local validChars = {}
 		local validSet = {}
 		local nearestWorldChar, nearestWorldDist = nil, math.huge
@@ -1389,7 +1353,22 @@ if isNewFender and AbilityUtilities and AbilityUtilities.GetPlayerNearMouse then
 			end
 		end
 
-		-- Step 1: Direct cursor raycast hit guarantees hovering over a player selects THAT player, not anyone else
+		-- Mobile / Touch mode: always target closest player in 3D world range on tap/click!
+		local isTouchDevice = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+		if isTouchDevice then
+			local autoChosen = nearestGrabChar or nearestWorldChar
+			if autoChosen and autoChosen.PrimaryPart and (autoChosen.PrimaryPart.Position - myPrimary.Position).Magnitude <= effectiveRange then
+				return autoChosen
+			end
+			for _, ch in ipairs(validChars) do
+				if ch.PrimaryPart and (ch.PrimaryPart.Position - myPrimary.Position).Magnitude <= effectiveRange then
+					return ch
+				end
+			end
+			return nil
+		end
+
+		-- Step 1 (PC): Direct cursor raycast hit guarantees hovering over a player selects THAT player, not someone else
 		local rayChar = KW.raycastModelUnderMouse(cam, mouseVec, myChar, validSet)
 		if rayChar and rayChar.PrimaryPart then
 			local rayWorldDist = (rayChar.PrimaryPart.Position - myPrimary.Position).Magnitude
@@ -1402,27 +1381,25 @@ if isNewFender and AbilityUtilities and AbilityUtilities.GetPlayerNearMouse then
 			end
 		end
 
-		-- Step 2: Screen-space nearest to cursor (always pick the target closest to cursor/mouse on screen)
-		local bestChar, bestScreenDist = nil, math.huge
-		for _, ch in ipairs(validChars) do
-			local worldDist = (ch.PrimaryPart.Position - myPrimary.Position).Magnitude
-			if worldDist <= effectiveRange then
-				local sDist = KW.getModelCursorDist(cam, mouseVec, ch)
-				if sDist < bestScreenDist then
-					bestScreenDist = sDist
-					bestChar = ch
+		-- Step 2 (PC): Screen-space nearest to cursor within tight cone (check torso/head/root so limbs near cursor register accurately)
+		if not state.nearestTargetMode or not isOutspammerActive then
+			local bestChar, bestScreenDist = nil, math.huge
+			for _, ch in ipairs(validChars) do
+				local worldDist = (ch.PrimaryPart.Position - myPrimary.Position).Magnitude
+				if worldDist <= effectiveRange then
+					local sDist = KW.getModelCursorDist(cam, mouseVec, ch)
+					if sDist <= cursorConePx and sDist < bestScreenDist then
+						bestScreenDist = sDist
+						bestChar = ch
+					end
 				end
 			end
-		end
-
-		if bestChar then
-			-- If nearestTargetMode is disabled or candidate is reasonably on-screen (within 650px), select target closest to cursor!
-			if not state.nearestTargetMode or bestScreenDist <= 650 then
+			if bestChar then
 				return bestChar
 			end
 		end
 
-		-- Step 3: Only fall back to 3D nearest-in-world when nearestTargetMode is explicitly enabled or no target is on screen
+		-- Only allow non-cursor nearest-in-world fallback when Outspammer/nearestTargetMode auto-targeting is active
 		if isOutspammerActive or state.nearestTargetMode then
 			local autoChosen = nearestGrabChar or nearestWorldChar
 			if autoChosen and autoChosen.PrimaryPart and (autoChosen.PrimaryPart.Position - myPrimary.Position).Magnitude <= effectiveRange then
@@ -1430,11 +1407,7 @@ if isNewFender and AbilityUtilities and AbilityUtilities.GetPlayerNearMouse then
 			end
 		end
 
-		-- Final fallback to on-screen bestChar if available
-		if bestChar then
-			return bestChar
-		end
-
+		-- Never fall back to native PointerMouse (which may carry an override or wider stale pos)
 		return nil
 	end
 end
@@ -1572,18 +1545,26 @@ local function ensureTotemPlatform()
 	local c = LocalPlayer.Character
 	local hrp = c and c:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
-	local existing = workspace:FindFirstChild("KW_TotemPlatform")
+	local map = workspace:FindFirstChild("Map")
+	local existing = (map and map:FindFirstChild("KW_TotemPlatform")) or workspace:FindFirstChild("KW_TotemPlatform")
 	if existing then existing:Destroy() end
+	-- Only spawn a raycast ground pad when actually airborne (no real ground within 5 studs below)
+	local rp = RaycastParams.new()
+	rp.FilterType = Enum.RaycastFilterType.Exclude
+	rp.FilterDescendantsInstances = { c }
+	if workspace:Raycast(hrp.Position, Vector3.new(0, -5, 0), rp) then
+		return
+	end
 	local plat = Instance.new("Part")
 	plat.Name = "KW_TotemPlatform"
 	plat.Size = Vector3.new(14, 1, 14)
-	plat.CFrame = hrp.CFrame - Vector3.new(0, 3.2, 0)
+	-- Keep top surface safely below feet so it never lifts/levitates the character
+	plat.CFrame = CFrame.new(hrp.Position.X, hrp.Position.Y - 4.0, hrp.Position.Z)
 	plat.Anchored = true
 	plat.CanCollide = true
 	plat.Transparency = 1
 	plat.Material = Enum.Material.Plastic
 	-- Place inside workspace.Map so map-filtered raycasts treat it as valid ground
-	local map = workspace:FindFirstChild("Map")
 	plat.Parent = map or workspace
 	task.delay(0.6, function()
 		if plat and plat.Parent then
@@ -1606,6 +1587,10 @@ function KW.installControllerHooks()
 				if key == "ExtraKey4" or (btn and btn.Name == "ExtraKey4") then
 					pcall(ensureTotemPlatform)
 				end
+				if key == "ExtraKey5" or (btn and btn.Name == "ExtraKey5") then
+					KW.ek5Role = "caster"
+					KW.ek5CasterActiveUntil = os.clock() + 30.0
+				end
 				return rawPress(btn, key, ...)
 			end
 			KW.kwWrappedFuncs[wrappedPress] = true
@@ -1622,6 +1607,10 @@ function KW.installControllerHooks()
 				if key == "ExtraKey4" or (btn and btn.Name == "ExtraKey4") then
 					pcall(ensureTotemPlatform)
 				end
+				if key == "ExtraKey5" or (btn and btn.Name == "ExtraKey5") then
+					KW.ek5Role = "caster"
+					KW.ek5CasterActiveUntil = os.clock() + 30.0
+				end
 				return rawKeyDown(btn, key, ...)
 			end
 			KW.kwWrappedFuncs[wrappedKeyDown] = true
@@ -1636,18 +1625,22 @@ function KW.installControllerHooks()
 					local ev = (...)
 					if ev == "CasterCine" then
 						KW.ek5Role = "caster"
+						KW.ek5CasterActiveUntil = os.clock() + 30.0
 						KW.ek5VictimActive = false
 						KW.ek5VictimArrived = false
 					elseif ev == "CasterCineEnd" then
-						if KW.ek5Role == "caster" then KW.ek5Role = nil end
+						KW.ek5CasterActiveUntil = math.max(KW.ek5CasterActiveUntil or 0, os.clock() + 20.0)
+						KW.ek5Role = "caster"
 					elseif ev == "VictimCine" then
-						KW.ek5Role = "victim"
-						KW.ek5VictimActive = true
-						KW.ek5VictimArrived = false
-						KW.ek5StartedAt = os.clock()
-						KW.markIntentionalTp(6.5)
+						if (KW.ek5CasterActiveUntil or 0) < os.clock() and KW.ek5Role ~= "caster" then
+							KW.ek5Role = "victim"
+							KW.ek5VictimActive = true
+							KW.ek5VictimArrived = false
+							KW.ek5StartedAt = os.clock()
+							KW.markIntentionalTp(6.5)
+						end
 					elseif ev == "Arrive" or ev == "SoulGui" then
-						if KW.ek5Role ~= "caster" then
+						if (KW.ek5CasterActiveUntil or 0) < os.clock() and KW.ek5Role ~= "caster" then
 							KW.ek5Role = "victim"
 							KW.ek5VictimActive = true
 							KW.ek5VictimArrived = true
@@ -2075,169 +2068,6 @@ local createPlayerEsp, clearPlayerEsp, clearWorldObjectEsp, scanAndTrackWorldObj
 local statusSetters, rebindButton, listeningForKey = nil, nil, false
 
 -- ============================================================================
--- CANDY AUTOFARM, QUESTS & CODES ENGINE
-
--- ============================================================================
-
-local function collectCandySweep()
-	local c = LocalPlayer.Character
-	local hrp = c and c:FindFirstChild("HumanoidRootPart")
-	if not hrp then return 0 end
-	local savedCF = hrp.CFrame
-	local collected = 0
-	-- Helper: instantly sweep all dropped candies/candycorn/lollipops (touch parts)
-	local function vacuumNearbyCandy(radius)
-		local myPos = hrp.Position
-		for _, item in ipairs(workspace:GetDescendants()) do
-			if item:IsA("BasePart") and item.Parent and not item:FindFirstChildOfClass("ProximityPrompt") then
-				local iName = item.Name:lower()
-				local full = item:GetFullName():lower()
-				if not full:find("witches") and not full:find("wicthes") then
-					if iName:find("candy") or iName:find("lollipop") or iName:find("candycorn") or iName:find("treat") then
-						local dist = (item.Position - myPos).Magnitude
-						if not radius or dist <= radius then
-							KW.markIntentionalTp(1.5)
-							hrp.CFrame = item.CFrame * CFrame.new(0, 0.5, 0)
-							if firetouchinterest then
-								pcall(firetouchinterest, hrp, item, 0)
-								task.wait(0.03)
-								pcall(firetouchinterest, hrp, item, 1)
-							end
-							task.wait(0.14)
-							collected += 1
-						end
-					end
-				end
-			end
-		end
-	end
-	-- PRIORITY 1: ALWAYS COLLECT ALL WORLD CANDY DROPS FIRST
-	vacuumNearbyCandy(nil)
-	-- PRIORITY 2: HARVEST PUMPKINS & PRESENTS (PROXIMITY PROMPTS)
-	for _, inst in ipairs(workspace:GetDescendants()) do
-		if not state.candyAutofarm then break end
-		if inst:IsA("ProximityPrompt") and inst.Enabled then
-			local full = inst:GetFullName():lower()
-			local act = (inst.ActionText or ""):lower()
-			local obj = (inst.ObjectText or ""):lower()
-			local pName = (inst.Parent and inst.Parent.Name or ""):lower()
-			if not full:find("witches") and not full:find("wicthes") and not full:find("bellprompt") and not obj:find("witches") then
-				if full:find("pumpkin") or full:find("gift") or full:find("candy") or full:find("treat") or full:find("present")
-					or obj:find("pumpkin") or obj:find("gift") or obj:find("candy") or obj:find("treat") or obj:find("present")
-					or act:find("pumpkin") or act:find("gift") or act:find("candy") or act:find("treat") or act:find("take") or act:find("grab")
-					or pName:find("pumpkin") or pName:find("gift") or pName:find("candy") or pName:find("present") then
-					local part = inst.Parent:IsA("BasePart") and inst.Parent or inst.Parent:FindFirstChildWhichIsA("BasePart", true)
-					if part then
-						KW.markIntentionalTp(1.5)
-						hrp.CFrame = part.CFrame * CFrame.new(0, 0, 2.2)
-						task.wait(0.20)
-						inst.HoldDuration = 0
-						inst.RequiresLineOfSight = false
-						inst.MaxActivationDistance = 32
-						if fireproximityprompt then pcall(fireproximityprompt, inst) end
-						task.wait(0.24)
-						collected += 1
-						-- Vacuum any candy that spawned right next to this pumpkin/gift!
-						vacuumNearbyCandy(28)
-					end
-				end
-			end
-		end
-	end
-	-- PRIORITY 3: RING HOUSE DOORBELLS & IMMEDIATELY VACUUM SPAWNED CANDY
-	for _, inst in ipairs(workspace:GetDescendants()) do
-		if not state.candyAutofarm then break end
-		if inst:IsA("ClickDetector") then
-			local full = inst:GetFullName():lower()
-			local pName = inst.Parent and inst.Parent.Name:lower() or ""
-			if (full:find("house") or pName:find("doorbell") or pName:find("bell")) and not full:find("witches") and not full:find("wicthes") then
-				local part = inst.Parent:IsA("BasePart") and inst.Parent or inst.Parent:FindFirstChildWhichIsA("BasePart", true)
-				if part then
-					KW.markIntentionalTp(1.5)
-					hrp.CFrame = part.CFrame * CFrame.new(0, 0, 2.0)
-					task.wait(0.22)
-					if fireclickdetector then
-						pcall(fireclickdetector, inst)
-					end
-					-- Brisk dwell for candy drop, then vacuum immediately
-					task.wait(0.35)
-					vacuumNearbyCandy(35)
-					collected += 1
-				end
-			end
-		end
-	end
-	if hrp and hrp.Parent and not state.inSafeSpot then
-		KW.markIntentionalTp(1.5)
-		hrp.CFrame = savedCF
-	end
-	return collected
-end
-
-local function claimAllAvailableQuests()
-	local claimed = 0
-	pcall(function()
-		if not Knit then return end
-		local QuestService = Knit.GetService("QuestService")
-		if QuestService and QuestService.GetState then
-			local qState = QuestService:GetState()
-			if type(qState) == "table" then
-				for _, kind in ipairs({ "Daily", "Weekly" }) do
-					local cat = qState[kind]
-					if type(cat) == "table" and type(cat.Quests) == "table" then
-						for idx, q in pairs(cat.Quests) do
-							if q.Progress and q.Required and q.Progress >= q.Required and not q.Claimed then
-								pcall(function() QuestService:Claim(kind, idx) end)
-								claimed += 1
-							end
-						end
-						if cat.Bonus and not cat.BonusClaimed then
-							pcall(function() QuestService:ClaimBonus(kind) end)
-							claimed += 1
-						end
-					end
-				end
-			end
-		end
-		local bqs = Knit.GetService("BonnieQuestService")
-		if bqs and bqs.BonnieCollect then pcall(function() bqs.BonnieCollect:Fire() end) end
-		local fqs = Knit.GetService("FantasmaQuestService")
-		if fqs and fqs.FantasmaCollect then pcall(function() fqs.FantasmaCollect:Fire() end) end
-		local kqs = Knit.GetService("KnittingQuestService")
-		if kqs and kqs.Completed then pcall(function() kqs.Completed:Fire() end) end
-	end)
-	return claimed
-end
-
-local KNOWN_CODES = {
-	"DARKHOLDUNLEASHED", "THEWITCHINGHOUR", "1KLIKES", "1KLIKESCANDY",
-	"30KVISITS", "50KVISITS", "100KVISITS", "1MVISITS",
-	"RELEASE", "NEWFENDER", "HALLOWEEN", "CANDY", "PUMPKIN",
-	"SORRY", "UPDATE", "WITCHESROAD", "DARKHOLD", "HERETIC",
-	"BONNIE", "RAVEN", "TESSA", "SCARLETWITCH", "JOSIE"
-}
-
-local function redeemAllKnownCodes()
-	if not Knit then return 0, 0 end
-	local cs = Knit.GetService("CodesService")
-	if not cs or not cs.Redeem then return 0, 0 end
-	pcall(function() cs:RefreshGroupStatus() end)
-	local succ, already = 0, 0
-	for _, code in ipairs(KNOWN_CODES) do
-		local ok, res = pcall(function() return cs:Redeem(code) end)
-		if ok and res then
-			local s = tostring(res):upper()
-			if s:find("SUCCESS") or s:find("REDEEMED") and not s:find("ALREADY") and not s:find("FAILED") and not s:find("INVALID") then
-				succ += 1
-			elseif s:find("ALREADY") then
-				already += 1
-			end
-		end
-		task.wait(0.12)
-	end
-	return succ, already
-end
-
 local function initInterface()
 	pcall(function()
 		if type(gethui) == "function" then
@@ -2725,6 +2555,52 @@ local function initInterface()
 		if callback then b.MouseButton1Click:Connect(function() callback(b) end) end
 		return b
 	end
+
+	local function choice(parent, title, options, current, callback)
+		local row = card(parent, 46)
+		local lbl = new("TextLabel", {
+			Size = UDim2.new(0.35, 0, 1, 0),
+			BackgroundTransparency = 1,
+			Text = title,
+			Font = FONT_MED,
+			TextSize = 12,
+			TextColor3 = Theme.text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}, row)
+		local btnContainer = new("Frame", {
+			Size = UDim2.new(0.65, 0, 1, 0),
+			Position = UDim2.new(0.35, 0, 0, 0),
+			BackgroundTransparency = 1,
+		}, row)
+		local layout = new("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Right,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			Padding = UDim.new(0, 4),
+		}, btnContainer)
+		for _, opt in ipairs(options) do
+			local isSel = (opt == current)
+			local optBtn = new("TextButton", {
+				Size = UDim2.new(0, 78, 0, 26),
+				BackgroundColor3 = isSel and Theme.accent or Theme.btn,
+				Font = FONT_BOLD,
+				Text = opt,
+				TextSize = 9,
+				TextColor3 = isSel and WHITE or Theme.sub,
+				AutoButtonColor = true,
+			}, btnContainer)
+			round(optBtn, 6)
+			trackConn(optBtn.MouseButton1Click:Connect(function()
+				for _, c in ipairs(btnContainer:GetChildren()) do
+					if c:IsA("TextButton") then
+						c.BackgroundColor3 = (c.Text == opt) and Theme.accent or Theme.btn
+						c.TextColor3 = (c.Text == opt) and WHITE or Theme.sub
+					end
+				end
+				pcall(callback, opt)
+			end))
+		end
+	end
 	local function statusCard(parent, names)
 		local c = card(parent, 16 + #names * 24)
 		local setters = {}
@@ -2929,6 +2805,7 @@ local function initInterface()
 		local bg = new("BillboardGui", {
 			Name = "KW_Tag",
 			AlwaysOnTop = true,
+			MaxDistance = math.huge,
 			Size = UDim2.fromOffset(240, 48),
 			StudsOffset = Vector3.new(0, 3.9, 0),
 			ResetOnSpawn = false,
@@ -3066,9 +2943,9 @@ local function initInterface()
 
 	-- ============================================================================
 	local function buildCombatPage(combatPage)
-		section(combatPage, "Premium Outspammer")
-		toggle(combatPage, "Premium Outspammer", "Hold any ability key to outspam abilities at extreme rate.", state.outspammer, function(v)
-			state.outspammer = v
+		section(combatPage, "Targeting & Reach")
+		slider(combatPage, "Ability Range", 100, 1000, 25, state.customRangeDistance or 250, function(v) return string.format("%d studs", v) end, function(v)
+			state.customRangeDistance = v
 		end)
 		toggle(combatPage, "Aim assist for projectiles", "Automatically aims your M1 projectiles onto your target (M1 only; does not affect abilities).", state.projectileAimAssist, function(v)
 			state.projectileAimAssist = v
@@ -3076,14 +2953,21 @@ local function initInterface()
 				KW.clearM1AimOverride()
 			end
 		end)
+		toggle(combatPage, "Exclude friends", "Prevents the outspammer from detecting or auto-targeting friends while still allowing manual hits.", state.excludeFriends, function(v)
+			state.excludeFriends = v
+		end)
+
+		section(combatPage, "Combat Automation")
+		toggle(combatPage, "Premium Outspammer", "Hold any ability key to outspam abilities at extreme rate.", state.outspammer, function(v)
+			state.outspammer = v
+		end)
+
+		section(combatPage, "Combat Defense & Utilities")
 		toggle(combatPage, "Anti-Summon", "Blocks hostile summon circles, summon traps, and forced teleports.", state.antiSummon, function(v)
 			state.antiSummon = v
 		end)
 		toggle(combatPage, "Always Allow Reset", "Prevents the game from locking the Reset Character button in the Esc menu.", state.alwaysAllowReset, function(v)
 			state.alwaysAllowReset = v
-		end)
-		toggle(combatPage, "Exclude friends" , "Prevents the outspammer from detecting or auto-targeting friends while still allowing manual hits.", state.excludeFriends, function(v)
-			state.excludeFriends = v
 		end)
 		toggle(combatPage, "Auto Perfect Clash", "Automatically scores 100% Perfect on the white dial zone to win every clash.", state.autoBeamClash, function(v)
 			state.autoBeamClash = v
@@ -3091,14 +2975,6 @@ local function initInterface()
 		toggle(combatPage, "Auto Escape Pendant", "Automatically scores 100% Perfect to escape and win the Pendant Banish battle.", state.autoEscapePendant, function(v)
 			state.autoEscapePendant = v
 		end)
-		toggle(combatPage, "Bypass Contract Limit", "Allows The Death to make death contracts repeatedly without the 1-per-life lock.", state.bypassContractLimit, function(v)
-			state.bypassContractLimit = v
-		end)
-		section(combatPage, "Targeting & Ability Range")
-		slider(combatPage, "Ability Range", 100, 1000, 25, state.customRangeDistance or 250, function(v) return string.format("%d studs", v) end, function(v)
-			state.customRangeDistance = v
-		end)
--- (Target lock reticle removed per user instruction)
 	end
 	buildCombatPage(addTab("Combat", "C"))
 
@@ -3136,7 +3012,7 @@ local function initInterface()
 				applyPowerRecolorToActive(true)
 			end
 		end)
-		button(visualsPage, "⚡ Force Re-Color Active Powers", "accent", function()
+		button(visualsPage, "âš¡ Force Re-Color Active Powers", "accent", function()
 			if applyPowerRecolorToActive then
 				applyPowerRecolorToActive(true)
 			end
@@ -3150,7 +3026,7 @@ local function initInterface()
 				state.espChamsFill = 0.75
 				state.espShowHp = true
 				state.espShowDist = true
-				state.espMaxDist = 3000
+				state.espMaxDist = math.huge
 				task.defer(function() if updateVisuals then pcall(updateVisuals) end end)
 			else
 				for p in pairs(playerEspMap) do clearPlayerEsp(p) end
@@ -3351,28 +3227,9 @@ local function removeSafeRoom()
 	end
 end
 
-local function buildSafeRoom(centerPos)
-	removeSafeRoom()
-	local model = Instance.new("Model")
-	model.Name = "KW_SafeRoom"
-	local function addPart(name, size, cf, color, mat, trans, canCol, shape)
-		local p = Instance.new("Part")
-		p.Name = name or "RoadPart"
-		p.Anchored = true
-		p.CanCollide = (canCol ~= false)
-		p.Size = size
-		p.CFrame = cf
-		p.Color = color or Color3.fromRGB(22, 24, 25)
-		p.Material = mat or Enum.Material.Cobblestone
-		p.Transparency = trans or 0
-		if shape then p.Shape = shape end
-		p.TopSurface = Enum.SurfaceType.Smooth
-		p.BottomSurface = Enum.SurfaceType.Smooth
-		p.Parent = model
-		return p
-	end
-	-- Dimensions: 280 studs long road (Z: -140 to +140), 32 studs wide road, 190 studs total forest width
-	local ROAD_LEN = 280
+
+function buildDeathsPalace(centerPos, model, addPart)
+local ROAD_LEN = 280
 	local ROAD_W = 32
 	local TOTAL_W = 190
 	-- Dark Forest Ground (Soil, moss, decayed forest floor)
@@ -3665,7 +3522,7 @@ local function buildSafeRoom(centerPos)
 	local plaqueLbl = Instance.new("TextLabel")
 	plaqueLbl.Size = UDim2.fromScale(1, 1)
 	plaqueLbl.BackgroundTransparency = 1
-	plaqueLbl.Text = "RIO VIDAL  —  THE DEATH"
+	plaqueLbl.Text = "RIO VIDAL  â€”  THE DEATH"
 	plaqueLbl.TextColor3 = Color3.fromRGB(100, 240, 145)
 	plaqueLbl.Font = Enum.Font.GothamBold
 	plaqueLbl.TextScaled = true
@@ -3756,7 +3613,7 @@ local function buildSafeRoom(centerPos)
 		tLbl.Size = UDim2.fromScale(1, 0.4)
 		tLbl.Position = UDim2.fromScale(0, 0.5)
 		tLbl.BackgroundTransparency = 1
-		tLbl.Text = "✦ THE DEATH ✦"
+		tLbl.Text = "âœ¦ THE DEATH âœ¦"
 		tLbl.TextColor3 = Color3.fromRGB(240, 215, 140)
 		tLbl.Font = Enum.Font.GothamMedium
 		tLbl.TextScaled = true
@@ -3887,7 +3744,7 @@ local function buildSafeRoom(centerPos)
 			nameL.Size = UDim2.new(1, -24, 0, 26)
 			nameL.Position = UDim2.new(0, 16, 0, 8)
 			nameL.BackgroundTransparency = 1
-			nameL.Text = "Rio Vidal  [ The Death ]  ✦  Holding Hands"
+			nameL.Text = "Rio Vidal  [ The Death ]  âœ¦  Holding Hands"
 			nameL.TextColor3 = Color3.fromRGB(120, 255, 160)
 			nameL.Font = Enum.Font.GothamBold
 			nameL.TextSize = 15
@@ -3955,7 +3812,7 @@ local function buildSafeRoom(centerPos)
 			closeBtn.Position = UDim2.new(1, -34, 0, 8)
 			closeBtn.BackgroundColor3 = Color3.fromRGB(40, 16, 20)
 			closeBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
-			closeBtn.Text = "✕"
+			closeBtn.Text = "âœ•"
 			closeBtn.Font = Enum.Font.GothamBold
 			closeBtn.TextSize = 14
 			closeBtn.Parent = frame
@@ -4051,24 +3908,539 @@ local function buildSafeRoom(centerPos)
 		end
 		prompt.Triggered:Connect(openDialogue)
 	end)
+	
+
+	-- ================================================================
+	-- RIO VIDAL (LADY DEATH) FRAMED CHARACTER PORTRAIT MONUMENT
+	-- ================================================================
+	local portraitCF = CFrame.new(thronePos) * throneRot * CFrame.new(0, 11, -4.2)
+	local canvas = addPart("RioPortraitCanvas", Vector3.new(10, 14, 0.8), portraitCF, Color3.fromRGB(15, 18, 16), Enum.Material.SmoothPlastic)
+	local sg = Instance.new("SurfaceGui")
+	sg.Name = "RioPortraitGui"
+	sg.Face = Enum.NormalId.Front
+	sg.CanvasSize = Vector2.new(500, 700)
+	sg.LightInfluence = 0
+	sg.Parent = canvas
+
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.new(1, 0, 1, 0)
+	bg.BackgroundColor3 = Color3.fromRGB(10, 14, 12)
+	bg.BorderSizePixel = 0
+	bg.Parent = sg
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(45, 180, 95)
+	stroke.Thickness = 5
+	stroke.Parent = bg
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 14)
+	corner.Parent = bg
+
+	local crest = Instance.new("ImageLabel")
+	crest.Size = UDim2.new(0, 80, 0, 80)
+	crest.Position = UDim2.new(0.5, -40, 0, 15)
+	crest.BackgroundTransparency = 1
+	crest.Image = "rbxassetid://135176677714056"
+	crest.ImageColor3 = Color3.fromRGB(45, 180, 95)
+	crest.ScaleType = Enum.ScaleType.Fit
+	crest.Parent = bg
+
+	local img = Instance.new("ImageLabel")
+	img.Size = UDim2.new(0, 360, 0, 360)
+	img.Position = UDim2.new(0.5, -180, 0, 105)
+	img.BackgroundTransparency = 1
+	img.Image = "rbxassetid://114074779590787"
+	img.ScaleType = Enum.ScaleType.Fit
+	img.Parent = bg
+
+	local plaque = Instance.new("Frame")
+	plaque.Size = UDim2.new(1, -30, 0, 160)
+	plaque.Position = UDim2.new(0, 15, 1, -180)
+	plaque.BackgroundColor3 = Color3.fromRGB(6, 10, 8)
+	plaque.BorderSizePixel = 0
+	plaque.Parent = bg
+
+	local pStroke = Instance.new("UIStroke")
+	pStroke.Color = Color3.fromRGB(45, 180, 95)
+	pStroke.Thickness = 2
+	pStroke.Parent = plaque
+
+	local pCorner = Instance.new("UICorner")
+	pCorner.CornerRadius = UDim.new(0, 8)
+	pCorner.Parent = plaque
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0, 60)
+	title.Position = UDim2.new(0, 0, 0, 12)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.Fondamento
+	title.Text = "LADY DEATH"
+	title.TextColor3 = Color3.fromRGB(220, 255, 230)
+	title.TextSize = 48
+	title.Parent = plaque
+
+	local sub = Instance.new("TextLabel")
+	sub.Size = UDim2.new(1, 0, 0, 40)
+	sub.Position = UDim2.new(0, 0, 0, 75)
+	sub.BackgroundTransparency = 1
+	sub.Font = Enum.Font.Garamond
+	sub.Text = "RIO VIDAL â€¢ THE DEATH"
+	sub.TextColor3 = Color3.fromRGB(140, 210, 160)
+	sub.TextSize = 24
+	sub.Parent = plaque
+
+end
+
+function buildRoyalPalace(centerPos, model, addPart)
+-- 1. BIG WHITE ROOM SHELL (Matte clean white, NOT glowing / NOT neon)
+			-- Floor
+			addPart("Floor", Vector3.new(64, 2, 64), CFrame.new(centerPos), Color3.fromRGB(244, 244, 246), Enum.Material.SmoothPlastic)
+			-- Ceiling
+			addPart("Ceiling", Vector3.new(64, 2, 64), CFrame.new(centerPos + Vector3.new(0, 24, 0)), Color3.fromRGB(250, 250, 252), Enum.Material.SmoothPlastic)
+			-- 4 Walls (24 studs high, smooth matte white)
+			addPart("NorthWall", Vector3.new(64, 24, 2), CFrame.new(centerPos + Vector3.new(0, 11, -31)), Color3.fromRGB(248, 248, 252), Enum.Material.SmoothPlastic)
+			addPart("SouthWall", Vector3.new(64, 24, 2), CFrame.new(centerPos + Vector3.new(0, 11, 31)), Color3.fromRGB(248, 248, 252), Enum.Material.SmoothPlastic)
+			addPart("WestWall", Vector3.new(2, 24, 64), CFrame.new(centerPos + Vector3.new(-31, 11, 0)), Color3.fromRGB(248, 248, 252), Enum.Material.SmoothPlastic)
+			addPart("EastWall", Vector3.new(2, 24, 64), CFrame.new(centerPos + Vector3.new(31, 11, 0)), Color3.fromRGB(248, 248, 252), Enum.Material.SmoothPlastic)
+
+			-- Perimeter Baseboards
+			addPart("TrimN", Vector3.new(62, 0.8, 0.2), CFrame.new(centerPos + Vector3.new(0, 1.4, -29.9)), Color3.fromRGB(215, 218, 226))
+			addPart("TrimS", Vector3.new(62, 0.8, 0.2), CFrame.new(centerPos + Vector3.new(0, 1.4, 29.9)), Color3.fromRGB(215, 218, 226))
+			addPart("TrimW", Vector3.new(0.2, 0.8, 62), CFrame.new(centerPos + Vector3.new(-29.9, 1.4, 0)), Color3.fromRGB(215, 218, 226))
+			addPart("TrimE", Vector3.new(0.2, 0.8, 62), CFrame.new(centerPos + Vector3.new(29.9, 1.4, 0)), Color3.fromRGB(215, 218, 226))
+
+			-- Soft Ceiling Downlights (Even, comfortable room light, no neon glare)
+			local lightOffsets = {
+				Vector3.new(-16, 22.8, -16),
+				Vector3.new(16, 22.8, -16),
+				Vector3.new(-16, 22.8, 16),
+				Vector3.new(16, 22.8, 16),
+				Vector3.new(0, 22.8, 0),
+			}
+			for i, offset in ipairs(lightOffsets) do
+				local fix = addPart("LightFix" .. i, Vector3.new(3, 0.4, 3), CFrame.new(centerPos + offset), Color3.fromRGB(235, 235, 240), Enum.Material.Metal)
+				local lt = Instance.new("PointLight")
+				lt.Brightness = 0.95
+				lt.Range = 40
+				lt.Color = Color3.fromRGB(255, 250, 242)
+				lt.Shadows = true
+				lt.Parent = fix
+			end
+
+			-- 2. LIVING SUITE: COUCH & COFFEE TABLE
+			-- Plush Area Rug
+			addPart("PlushRug", Vector3.new(28, 0.15, 22), CFrame.new(centerPos + Vector3.new(0, 1.08, 3)), Color3.fromRGB(226, 228, 235), Enum.Material.Fabric)
+			-- Luxury L-Shape Sectional Couch
+			addPart("CouchSeatMain", Vector3.new(20, 1.8, 7), CFrame.new(centerPos + Vector3.new(0, 2.0, 7)), Color3.fromRGB(246, 246, 248), Enum.Material.Fabric)
+			addPart("CouchBackMain", Vector3.new(20, 3.8, 1.6), CFrame.new(centerPos + Vector3.new(0, 4.2, 10.2)), Color3.fromRGB(238, 238, 242), Enum.Material.Fabric)
+			addPart("CouchSeatChaise", Vector3.new(7, 1.8, 9), CFrame.new(centerPos + Vector3.new(-6.5, 2.0, -1.0)), Color3.fromRGB(246, 246, 248), Enum.Material.Fabric)
+			addPart("CouchArmLeft", Vector3.new(1.6, 3.8, 17), CFrame.new(centerPos + Vector3.new(-9.3, 4.2, 3.0)), Color3.fromRGB(238, 238, 242), Enum.Material.Fabric)
+			addPart("CouchArmRight", Vector3.new(1.6, 2.8, 7), CFrame.new(centerPos + Vector3.new(9.3, 3.4, 7)), Color3.fromRGB(238, 238, 242), Enum.Material.Fabric)
+
+			-- Designer Throw Pillows
+			addPart("Pillow1", Vector3.new(2.4, 2.2, 1), CFrame.new(centerPos + Vector3.new(-6.5, 3.4, 9.2)) * CFrame.Angles(0, math.rad(-15), 0), Color3.fromRGB(215, 185, 120), Enum.Material.Fabric)
+			addPart("Pillow2", Vector3.new(2.4, 2.2, 1), CFrame.new(centerPos + Vector3.new(6.5, 3.4, 9.2)) * CFrame.Angles(0, math.rad(15), 0), Color3.fromRGB(58, 62, 72), Enum.Material.Fabric)
+			addPart("Pillow3", Vector3.new(2.2, 2.2, 1), CFrame.new(centerPos + Vector3.new(-8.2, 3.4, 3.0)) * CFrame.Angles(0, math.rad(75), 0), Color3.fromRGB(195, 202, 215), Enum.Material.Fabric)
+
+			-- Modern Glass & Chrome Coffee Table
+			addPart("CoffeeTableGlass", Vector3.new(10, 0.4, 5.5), CFrame.new(centerPos + Vector3.new(1, 2.4, 0)), Color3.fromRGB(215, 232, 245), Enum.Material.Glass, 0.45)
+			local legOffsets = { Vector3.new(-3.5, 1.2, -2.2), Vector3.new(5.5, 1.2, -2.2), Vector3.new(-3.5, 1.2, 2.2), Vector3.new(5.5, 1.2, 2.2) }
+			for _, lo in ipairs(legOffsets) do
+				addPart("TableLeg", Vector3.new(0.4, 2.2, 0.4), CFrame.new(centerPos + Vector3.new(1, 0, 0) + lo), Color3.fromRGB(220, 222, 228), Enum.Material.Metal)
+			end
+			addPart("TableBowl", Vector3.new(1.8, 0.6, 1.8), CFrame.new(centerPos + Vector3.new(1, 2.8, 0)), Color3.fromRGB(240, 240, 242), Enum.Material.SmoothPlastic, 0, true, Enum.PartType.Ball)
+			addPart("Magazine", Vector3.new(2, 0.1, 1.4), CFrame.new(centerPos + Vector3.new(3, 2.65, 0.5)) * CFrame.Angles(0, math.rad(20), 0), Color3.fromRGB(40, 42, 50))
+
+			-- 3. TIERED INDOOR WATER FOUNTAIN
+			local fPos = centerPos + Vector3.new(20, 1, 18)
+			addPart("FountainBase", Vector3.new(12, 2.2, 12), CFrame.new(fPos + Vector3.new(0, 1.1, 0)), Color3.fromRGB(235, 235, 240))
+			addPart("FountainWaterLow", Vector3.new(10.5, 1.8, 10.5), CFrame.new(fPos + Vector3.new(0, 1.4, 0)), Color3.fromRGB(65, 185, 245), Enum.Material.Glass, 0.35)
+			addPart("FountainCol1", Vector3.new(3.5, 3.8, 3.5), CFrame.new(fPos + Vector3.new(0, 3.5, 0)), Color3.fromRGB(240, 240, 245))
+			addPart("FountainMidBasin", Vector3.new(7, 1.4, 7), CFrame.new(fPos + Vector3.new(0, 5.2, 0)), Color3.fromRGB(235, 235, 240))
+			addPart("FountainMidWater", Vector3.new(5.8, 1.2, 5.8), CFrame.new(fPos + Vector3.new(0, 5.5, 0)), Color3.fromRGB(65, 185, 245), Enum.Material.Glass, 0.35)
+			addPart("FountainCol2", Vector3.new(2, 2.6, 2), CFrame.new(fPos + Vector3.new(0, 7.0, 0)), Color3.fromRGB(240, 240, 245))
+			addPart("FountainTopBasin", Vector3.new(3.6, 1.0, 3.6), CFrame.new(fPos + Vector3.new(0, 8.5, 0)), Color3.fromRGB(235, 235, 240))
+			addPart("FountainFinial", Vector3.new(1.8, 1.8, 1.8), CFrame.new(fPos + Vector3.new(0, 9.8, 0)), Color3.fromRGB(245, 245, 250), Enum.Material.SmoothPlastic, 0, true, Enum.PartType.Ball)
+			local fSound = Instance.new("Sound")
+			fSound.SoundId = "rbxassetid://9114223170"
+			fSound.Volume = 0.35
+			fSound.Looped = true
+			fSound.RollOffMaxDistance = 50
+			fSound.Parent = addPart("FountainEmitter", Vector3.new(0.5, 0.5, 0.5), CFrame.new(fPos + Vector3.new(0, 9.8, 0)), Color3.fromRGB(255, 255, 255), Enum.Material.SmoothPlastic, 1, false)
+			pcall(function() fSound:Play() end)
+
+			-- 4. ULTRA-HD FLATSCREEN TV & MEDIA ENTERTAINMENT UNIT
+			addPart("TVWallPanel", Vector3.new(26, 16, 0.4), CFrame.new(centerPos + Vector3.new(0, 11, -29.6)), Color3.fromRGB(236, 238, 242))
+			addPart("TVBezel", Vector3.new(17, 10, 0.4), CFrame.new(centerPos + Vector3.new(0, 13.5, -29.2)), Color3.fromRGB(15, 15, 18))
+			local tvScreen = addPart("TVScreen", Vector3.new(16.2, 9.2, 0.2), CFrame.new(centerPos + Vector3.new(0, 13.5, -28.9)), Color3.fromRGB(22, 26, 35), Enum.Material.Glass, 0.05)
+			tvScreen.Reflectance = 0.1
+			addPart("MediaConsole", Vector3.new(24, 2.4, 4), CFrame.new(centerPos + Vector3.new(0, 2.2, -27.5)), Color3.fromRGB(244, 245, 248))
+			addPart("Soundbar", Vector3.new(12, 0.6, 1.2), CFrame.new(centerPos + Vector3.new(0, 3.7, -27)), Color3.fromRGB(22, 22, 25))
+			addPart("FireplaceBox", Vector3.new(10, 1.8, 0.8), CFrame.new(centerPos + Vector3.new(0, 2.0, -25.2)), Color3.fromRGB(20, 15, 12))
+			local fireLight = Instance.new("PointLight")
+			fireLight.Brightness = 0.8
+			fireLight.Range = 15
+			fireLight.Color = Color3.fromRGB(255, 140, 50)
+			fireLight.Parent = addPart("FireplaceEmber", Vector3.new(8, 0.4, 0.4), CFrame.new(centerPos + Vector3.new(0, 1.4, -25.0)), Color3.fromRGB(255, 110, 30))
+
+			-- 5. ART GALLERY PAINTINGS
+			addPart("PaintFrame1", Vector3.new(0.5, 9, 14), CFrame.new(centerPos + Vector3.new(-29.6, 13, 0)), Color3.fromRGB(45, 38, 30), Enum.Material.Wood)
+			local c1 = addPart("Canvas1", Vector3.new(0.3, 8, 13), CFrame.new(centerPos + Vector3.new(-29.3, 13, 0)), Color3.fromRGB(245, 245, 245))
+			local sg1 = Instance.new("SurfaceGui")
+			sg1.Face = Enum.NormalId.Right
+			sg1.Parent = c1
+			local img1 = Instance.new("ImageLabel")
+			img1.Size = UDim2.fromScale(1, 1)
+			img1.BackgroundTransparency = 1
+			img1.Image = "rbxassetid://142278453"
+			img1.Parent = sg1
+
+			addPart("PaintFrame2", Vector3.new(0.5, 8, 11), CFrame.new(centerPos + Vector3.new(29.6, 13, -10)), Color3.fromRGB(25, 25, 28))
+			local c2 = addPart("Canvas2", Vector3.new(0.3, 7.2, 10.2), CFrame.new(centerPos + Vector3.new(29.3, 13, -10)), Color3.fromRGB(245, 245, 245))
+			local sg2 = Instance.new("SurfaceGui")
+			sg2.Face = Enum.NormalId.Left
+			sg2.Parent = c2
+			local img2 = Instance.new("ImageLabel")
+			img2.Size = UDim2.fromScale(1, 1)
+			img2.BackgroundTransparency = 1
+			img2.Image = "rbxassetid://6079331566"
+			img2.Parent = sg2
+
+			addPart("PaintFrame3", Vector3.new(8, 7, 0.5), CFrame.new(centerPos + Vector3.new(20, 13, -29.6)), Color3.fromRGB(30, 30, 35))
+			addPart("Canvas3", Vector3.new(7.2, 6.2, 0.3), CFrame.new(centerPos + Vector3.new(20, 13, -29.3)), Color3.fromRGB(240, 240, 242))
+
+			-- 6. FULL-LENGTH LUXURY VANITY MIRROR
+			addPart("MirrorFrame", Vector3.new(0.5, 14, 7), CFrame.new(centerPos + Vector3.new(-29.6, 9.5, -15)), Color3.fromRGB(215, 220, 230), Enum.Material.Metal)
+			local mg = addPart("MirrorGlass", Vector3.new(0.3, 13.2, 6.2), CFrame.new(centerPos + Vector3.new(-29.3, 9.5, -15)), Color3.fromRGB(242, 246, 255), Enum.Material.Glass)
+			mg.Reflectance = 0.95
+			addPart("VanityTable", Vector3.new(3, 1.2, 8), CFrame.new(centerPos + Vector3.new(-28, 2.2, -15)), Color3.fromRGB(245, 245, 248))
+
+			-- 7. EXTRA AMENITIES: BOOKSHELF, POTTED TREES, REFRESHMENT BAR
+			addPart("BookshelfFrame", Vector3.new(2.5, 15, 10), CFrame.new(centerPos + Vector3.new(29.5, 9, 5)), Color3.fromRGB(242, 242, 246))
+			for si = 1, 4 do
+				addPart("Shelf" .. si, Vector3.new(2.4, 0.4, 9.6), CFrame.new(centerPos + Vector3.new(29.5, 3.5 + si * 2.8, 5)), Color3.fromRGB(230, 232, 238))
+				addPart("Books" .. si, Vector3.new(1.8, 1.8, 7.5), CFrame.new(centerPos + Vector3.new(29.4, 4.6 + si * 2.8, 5)), (si % 2 == 0) and Color3.fromRGB(160, 45, 45) or Color3.fromRGB(45, 75, 140))
+			end
+
+			local treeCorners = { Vector3.new(-24, 1, 24), Vector3.new(24, 1, -24) }
+			for ti, tc in ipairs(treeCorners) do
+				addPart("PlanterPot" .. ti, Vector3.new(3, 3.5, 3), CFrame.new(centerPos + tc + Vector3.new(0, 1.75, 0)), Color3.fromRGB(242, 242, 246))
+				addPart("PlanterSoil" .. ti, Vector3.new(2.6, 0.4, 2.6), CFrame.new(centerPos + tc + Vector3.new(0, 3.4, 0)), Color3.fromRGB(60, 45, 30))
+				addPart("TreeTrunk" .. ti, Vector3.new(0.8, 6, 0.8), CFrame.new(centerPos + tc + Vector3.new(0, 6.5, 0)), Color3.fromRGB(90, 70, 50), Enum.Material.Wood)
+				addPart("TreeFoliage" .. ti, Vector3.new(5.5, 6, 5.5), CFrame.new(centerPos + tc + Vector3.new(0, 11, 0)), Color3.fromRGB(42, 115, 52), Enum.Material.SmoothPlastic, 0, true, Enum.PartType.Ball)
+			end
+
+			addPart("EspressoCounter", Vector3.new(4, 3.6, 9), CFrame.new(centerPos + Vector3.new(-25, 2.8, 22)), Color3.fromRGB(240, 242, 246))
+			addPart("EspressoTop", Vector3.new(4.4, 0.4, 9.4), CFrame.new(centerPos + Vector3.new(-25, 4.7, 22)), Color3.fromRGB(248, 248, 250), Enum.Material.SmoothPlastic)
+			addPart("CoffeeMachine", Vector3.new(1.8, 2, 2), CFrame.new(centerPos + Vector3.new(-25, 5.8, 24)), Color3.fromRGB(30, 30, 35))
+			addPart("Mug1", Vector3.new(0.6, 0.8, 0.6), CFrame.new(centerPos + Vector3.new(-25, 5.3, 21.5)), Color3.fromRGB(250, 250, 250), Enum.Material.SmoothPlastic, 0, true, Enum.PartType.Cylinder)
+			addPart("Mug2", Vector3.new(0.6, 0.8, 0.6), CFrame.new(centerPos + Vector3.new(-25, 5.3, 20.2)), Color3.fromRGB(250, 250, 250), Enum.Material.SmoothPlastic, 0, true, Enum.PartType.Cylinder)
+
+			model.Parent = workspace
+			trackInst(model)
+			
+
+	-- ================================================================
+	-- THE SCARLET WITCH (WANDA MAXIMOFF) ROYAL GALLERY PORTRAIT
+	-- ================================================================
+	local wandaCanvas = addPart("WandaPortraitCanvas", Vector3.new(14, 18, 0.8), CFrame.new(centerPos + Vector3.new(0, 13, -29.8)), Color3.fromRGB(25, 10, 14), Enum.Material.SmoothPlastic)
+	local sg = Instance.new("SurfaceGui")
+	sg.Name = "WandaPortraitGui"
+	sg.Face = Enum.NormalId.Front
+	sg.CanvasSize = Vector2.new(600, 800)
+	sg.LightInfluence = 0
+	sg.Parent = wandaCanvas
+
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.new(1, 0, 1, 0)
+	bg.BackgroundColor3 = Color3.fromRGB(22, 8, 12)
+	bg.BorderSizePixel = 0
+	bg.Parent = sg
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 205, 50)
+	stroke.Thickness = 6
+	stroke.Parent = bg
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 14)
+	corner.Parent = bg
+
+	local crest = Instance.new("ImageLabel")
+	crest.Size = UDim2.new(0, 90, 0, 90)
+	crest.Position = UDim2.new(0.5, -45, 0, 15)
+	crest.BackgroundTransparency = 1
+	crest.Image = "rbxassetid://14197236586"
+	crest.ImageColor3 = Color3.fromRGB(255, 205, 50)
+	crest.ScaleType = Enum.ScaleType.Fit
+	crest.Parent = bg
+
+	local img = Instance.new("ImageLabel")
+	img.Size = UDim2.new(0, 420, 0, 420)
+	img.Position = UDim2.new(0.5, -210, 0, 115)
+	img.BackgroundTransparency = 1
+	img.Image = "rbxassetid://128239019862484"
+	img.ScaleType = Enum.ScaleType.Fit
+	img.Parent = bg
+
+	local plaque = Instance.new("Frame")
+	plaque.Size = UDim2.new(1, -30, 0, 170)
+	plaque.Position = UDim2.new(0, 15, 1, -190)
+	plaque.BackgroundColor3 = Color3.fromRGB(15, 5, 8)
+	plaque.BorderSizePixel = 0
+	plaque.Parent = bg
+
+	local pStroke = Instance.new("UIStroke")
+	pStroke.Color = Color3.fromRGB(255, 205, 50)
+	pStroke.Thickness = 2
+	pStroke.Parent = plaque
+
+	local pCorner = Instance.new("UICorner")
+	pCorner.CornerRadius = UDim.new(0, 8)
+	pCorner.Parent = plaque
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0, 65)
+	title.Position = UDim2.new(0, 0, 0, 12)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.Fondamento
+	title.Text = "THE SCARLET WITCH"
+	title.TextColor3 = Color3.fromRGB(255, 230, 120)
+	title.TextSize = 52
+	title.Parent = plaque
+
+	local sub = Instance.new("TextLabel")
+	sub.Size = UDim2.new(1, 0, 0, 45)
+	sub.Position = UDim2.new(0, 0, 0, 80)
+	sub.BackgroundTransparency = 1
+	sub.Font = Enum.Font.Garamond
+	sub.Text = "WANDA MAXIMOFF â€¢ QUEEN OF CHAOS"
+	sub.TextColor3 = Color3.fromRGB(240, 160, 170)
+	sub.TextSize = 26
+	sub.Parent = plaque
+
+end
+
+
+function buildValakPalace(centerPos, model, addPart)
+	local CATH_L = 160
+	local CATH_W = 60
+	local CATH_H = 40
+
+	-- Base Foundation & Smoked Glass Shield Enclosure
+	addPart("ValakFloor", Vector3.new(CATH_W + 8, 3.0, CATH_L + 8), CFrame.new(centerPos + Vector3.new(0, -1.5, 0)), Color3.fromRGB(12, 12, 14), Enum.Material.Cobblestone)
+	addPart("ValakRoof", Vector3.new(CATH_W, 2.0, CATH_L), CFrame.new(centerPos + Vector3.new(0, CATH_H, 0)), Color3.fromRGB(0, 0, 0), Enum.Material.Glass, 0.88, true)
+	addPart("ValakWallN", Vector3.new(CATH_W, CATH_H, 2.0), CFrame.new(centerPos + Vector3.new(0, CATH_H/2, -CATH_L/2)), Color3.fromRGB(0, 0, 0), Enum.Material.Glass, 0.88, true)
+	addPart("ValakWallS", Vector3.new(CATH_W, CATH_H, 2.0), CFrame.new(centerPos + Vector3.new(0, CATH_H/2, CATH_L/2)), Color3.fromRGB(0, 0, 0), Enum.Material.Glass, 0.88, true)
+	addPart("ValakWallE", Vector3.new(2.0, CATH_H, CATH_L), CFrame.new(centerPos + Vector3.new(CATH_W/2, CATH_H/2, 0)), Color3.fromRGB(0, 0, 0), Enum.Material.Glass, 0.88, true)
+	addPart("ValakWallW", Vector3.new(2.0, CATH_H, CATH_L), CFrame.new(centerPos + Vector3.new(-CATH_W/2, CATH_H/2, 0)), Color3.fromRGB(0, 0, 0), Enum.Material.Glass, 0.88, true)
+
+	-- Blood Crimson Neon Wireframe Ribs
+	local bloodNeon = Color3.fromRGB(220, 25, 35)
+	addPart("ValakRib_RoofN", Vector3.new(CATH_W, 0.8, 0.8), CFrame.new(centerPos + Vector3.new(0, CATH_H, -CATH_L/2)), bloodNeon, Enum.Material.Neon)
+	addPart("ValakRib_RoofS", Vector3.new(CATH_W, 0.8, 0.8), CFrame.new(centerPos + Vector3.new(0, CATH_H, CATH_L/2)), bloodNeon, Enum.Material.Neon)
+	addPart("ValakRib_RoofE", Vector3.new(0.8, 0.8, CATH_L), CFrame.new(centerPos + Vector3.new(CATH_W/2, CATH_H, 0)), bloodNeon, Enum.Material.Neon)
+	addPart("ValakRib_RoofW", Vector3.new(0.8, 0.8, CATH_L), CFrame.new(centerPos + Vector3.new(-CATH_W/2, CATH_H, 0)), bloodNeon, Enum.Material.Neon)
+
+	-- Central Midnight Abbey Carpet
+	addPart("AbbeyCarpet", Vector3.new(16, 0.4, CATH_L - 20), CFrame.new(centerPos + Vector3.new(0, 0.2, 5)), Color3.fromRGB(12, 12, 14), Enum.Material.Fabric)
+	addPart("AbbeyCarpetTrimL", Vector3.new(0.5, 0.5, CATH_L - 20), CFrame.new(centerPos + Vector3.new(-8, 0.25, 5)), bloodNeon, Enum.Material.Neon)
+	addPart("AbbeyCarpetTrimR", Vector3.new(0.5, 0.5, CATH_L - 20), CFrame.new(centerPos + Vector3.new(8, 0.25, 5)), bloodNeon, Enum.Material.Neon)
+
+	-- Gothic Abbey Stone Piers & Torch Sconces
+	local zPiers = { 50, 20, -10, -40 }
+	for _, zp in ipairs(zPiers) do
+		for _, side in ipairs({ -1, 1 }) do
+			local xp = side * 22
+			addPart("PierBase_" .. zp .. "_" .. side, Vector3.new(4.5, 2.0, 4.5), CFrame.new(centerPos + Vector3.new(xp, 1.0, zp)), Color3.fromRGB(18, 18, 20), Enum.Material.Slate)
+			addPart("PierShaft_" .. zp .. "_" .. side, Vector3.new(3.0, 36.0, 3.0), CFrame.new(centerPos + Vector3.new(xp, 19.0, zp)), Color3.fromRGB(14, 14, 16), Enum.Material.Slate)
+			local sconce = addPart("Sconce_" .. zp .. "_" .. side, Vector3.new(1.2, 1.6, 1.2), CFrame.new(centerPos + Vector3.new(xp - side * 1.8, 16.0, zp)), bloodNeon, Enum.Material.Neon)
+			local pl = Instance.new("PointLight")
+			pl.Color = Color3.fromRGB(255, 110, 40)
+			pl.Range = 25
+			pl.Brightness = 1.6
+			pl.Parent = sconce
+		end
+	end
+
+	-- Gothic Altar & Reliquary Throne at Far End (Z = -60)
+	local altarPos = centerPos + Vector3.new(0, 0, -60)
+	addPart("AltarDais1", Vector3.new(24, 1.2, 18), CFrame.new(altarPos + Vector3.new(0, 0.6, 0)), Color3.fromRGB(16, 16, 20), Enum.Material.Cobblestone)
+	addPart("AltarDais2", Vector3.new(18, 1.2, 14), CFrame.new(altarPos + Vector3.new(0, 1.8, 0)), Color3.fromRGB(14, 14, 17), Enum.Material.Cobblestone)
+
+	-- Valak's Reliquary Throne
+	local thronePos = altarPos + Vector3.new(0, 2.4, -2)
+	addPart("ValakThroneSeat", Vector3.new(5.0, 1.0, 4.4), CFrame.new(thronePos + Vector3.new(0, 0.5, 0)), Color3.fromRGB(10, 10, 12), Enum.Material.Slate)
+	local seat = Instance.new("Seat")
+	seat.Name = "ThroneSeat"
+	seat.Size = Vector3.new(4.6, 0.6, 4.0)
+	seat.CFrame = CFrame.new(thronePos + Vector3.new(0, 1.1, 0))
+	seat.Color = Color3.fromRGB(70, 8, 12)
+	seat.Material = Enum.Material.Fabric
+	seat.Anchored = true
+	seat.Parent = model
+
+	addPart("ValakThroneBack", Vector3.new(5.2, 12.0, 1.2), CFrame.new(thronePos + Vector3.new(0, 6.8, -2.0)), Color3.fromRGB(10, 10, 12), Enum.Material.Slate)
+	addPart("ValakThroneSpire", Vector3.new(1.8, 4.0, 1.4), CFrame.new(thronePos + Vector3.new(0, 14.0, -2.0)), bloodNeon, Enum.Material.Neon)
+
+	-- ================================================================
+	-- VALAK (THE DEFILED NUN) FRAMED CHARACTER PORTRAIT
+	-- ================================================================
+	local portraitCanvas = addPart("ValakPortraitCanvas", Vector3.new(12, 16, 0.8), CFrame.new(altarPos + Vector3.new(0, 16.0, -8.0)), Color3.fromRGB(12, 12, 14), Enum.Material.SmoothPlastic)
+	local sg = Instance.new("SurfaceGui")
+	sg.Name = "ValakPortraitGui"
+	sg.Face = Enum.NormalId.Front
+	sg.CanvasSize = Vector2.new(500, 700)
+	sg.LightInfluence = 0
+	sg.Parent = portraitCanvas
+
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.new(1, 0, 1, 0)
+	bg.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
+	bg.BorderSizePixel = 0
+	bg.Parent = sg
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = bloodNeon
+	stroke.Thickness = 5
+	stroke.Parent = bg
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 14)
+	corner.Parent = bg
+
+	local crest = Instance.new("ImageLabel")
+	crest.Size = UDim2.new(0, 80, 0, 80)
+	crest.Position = UDim2.new(0.5, -40, 0, 15)
+	crest.BackgroundTransparency = 1
+	crest.Image = "rbxassetid://7752297574"
+	crest.ImageColor3 = bloodNeon
+	crest.ScaleType = Enum.ScaleType.Fit
+	crest.Parent = bg
+
+	local img = Instance.new("ImageLabel")
+	img.Size = UDim2.new(0, 360, 0, 360)
+	img.Position = UDim2.new(0.5, -180, 0, 105)
+	img.BackgroundTransparency = 1
+	img.Image = "rbxassetid://80829972641639"
+	img.ScaleType = Enum.ScaleType.Fit
+	img.Parent = bg
+
+	local plaque = Instance.new("Frame")
+	plaque.Size = UDim2.new(1, -30, 0, 160)
+	plaque.Position = UDim2.new(0, 15, 1, -180)
+	plaque.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
+	plaque.BorderSizePixel = 0
+	plaque.Parent = bg
+
+	local pStroke = Instance.new("UIStroke")
+	pStroke.Color = bloodNeon
+	pStroke.Thickness = 2
+	pStroke.Parent = plaque
+
+	local pCorner = Instance.new("UICorner")
+	pCorner.CornerRadius = UDim.new(0, 8)
+	pCorner.Parent = plaque
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0, 60)
+	title.Position = UDim2.new(0, 0, 0, 12)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.Fondamento
+	title.Text = "VALAK"
+	title.TextColor3 = Color3.fromRGB(240, 70, 80)
+	title.TextSize = 48
+	title.Parent = plaque
+
+	local sub = Instance.new("TextLabel")
+	sub.Size = UDim2.new(1, 0, 0, 40)
+	sub.Position = UDim2.new(0, 0, 0, 75)
+	sub.BackgroundTransparency = 1
+	sub.Font = Enum.Font.Garamond
+	sub.Text = "THE DEFILED NUN â€¢ DUKE OF HELL"
+	sub.TextColor3 = Color3.fromRGB(180, 110, 120)
+	sub.TextSize = 24
+	sub.Parent = plaque
+end
+
+function buildPrivateArea(centerPos, style)
+	removeSafeRoom()
+	local model = Instance.new("Model")
+	model.Name = "KW_SafeRoom"
+	local function addPart(name, size, cf, color, mat, trans, canCol, shape)
+		local p = Instance.new("Part")
+		p.Name = name or "Part"
+		p.Anchored = true
+		p.CanCollide = (canCol ~= false)
+		p.Size = size
+		p.CFrame = cf
+		p.Color = color or Color3.fromRGB(22, 24, 25)
+		p.Material = mat or Enum.Material.Cobblestone
+		p.Transparency = trans or 0
+		if shape then p.Shape = shape end
+		p.TopSurface = Enum.SurfaceType.Smooth
+		p.BottomSurface = Enum.SurfaceType.Smooth
+		p.Parent = model
+		return p
+	end
+
+	style = style or state.privateAreaStyle or "Death's Palace"
+	if style == "Royal Palace" then
+		buildRoyalPalace(centerPos, model, addPart)
+	elseif style == "Valak Palace" then
+		buildValakPalace(centerPos, model, addPart)
+	else
+		buildDeathsPalace(centerPos, model, addPart)
+	end
+
 	model.Parent = workspace
 	safeRoomModel = model
 	return model
 end
 
-		button(worldPage, "Teleport to safe spot", "primary", function()
+local function buildSafeRoom(centerPos)
+	return buildPrivateArea(centerPos, state.privateAreaStyle or "Death's Palace")
+end
+
+		section(worldPage, "Private Area")
+		choice(worldPage, "Palace Style", { "Death's Palace", "Royal Palace", "Valak Palace" }, state.privateAreaStyle or "Death's Palace", function(v)
+			state.privateAreaStyle = v
+			if state.inSafeSpot then
+				buildPrivateArea(SAFE_ROOM_POS, v)
+				local c = LocalPlayer.Character
+				local hrp = c and c:FindFirstChild("HumanoidRootPart")
+				if hrp then
+					if v == "Royal Palace" then
+						hrp.CFrame = CFrame.new(SAFE_ROOM_POS + Vector3.new(0, 4, 12)) * CFrame.Angles(0, 0, 0)
+					elseif v == "Valak Palace" then
+						hrp.CFrame = CFrame.new(SAFE_ROOM_POS + Vector3.new(0, 4, 30)) * CFrame.Angles(0, 0, 0)
+					else
+						hrp.CFrame = CFrame.new(SAFE_ROOM_POS + Vector3.new(0, 4, 0)) * CFrame.Angles(0, math.rad(180), 0)
+					end
+				end
+			end
+		end)
+		button(worldPage, "Teleport to Private Area", "primary", function()
 			local c = LocalPlayer.Character
 			local hrp = c and c:FindFirstChild("HumanoidRootPart")
 			if not hrp then return end
 			if not state.inSafeSpot then state.returnCFrame = hrp.CFrame end
-			buildSafeRoom(SAFE_ROOM_POS)
+			local style = state.privateAreaStyle or "Death's Palace"
+			buildPrivateArea(SAFE_ROOM_POS, style)
 			state.inSafeSpot = true
 			pcall(function() workspace.FallenPartsDestroyHeight = -50000 end)
 			KW.markIntentionalTp(2.5)
-			c:PivotTo(CFrame.new(SAFE_ROOM_POS + Vector3.new(0, 4, 0)) * CFrame.Angles(0, math.rad(180), 0))
+			if style == "Royal Palace" then
+				c:PivotTo(CFrame.new(SAFE_ROOM_POS + Vector3.new(0, 4, 12)) * CFrame.Angles(0, 0, 0))
+			elseif style == "Valak Palace" then
+				c:PivotTo(CFrame.new(SAFE_ROOM_POS + Vector3.new(0, 4, 30)) * CFrame.Angles(0, 0, 0))
+			else
+				c:PivotTo(CFrame.new(SAFE_ROOM_POS + Vector3.new(0, 4, 0)) * CFrame.Angles(0, math.rad(180), 0))
+			end
 			hrp.AssemblyLinearVelocity = Vector3.zero
 		end)
-		button(worldPage, "Return to battlefield", "secondary", function()
+		button(worldPage, "Return from Private Area", "secondary", function()
 			local c = LocalPlayer.Character
 			if c and c.PrimaryPart and state.inSafeSpot and state.returnCFrame then
 				state.inSafeSpot = false
@@ -4200,34 +4572,7 @@ end
 				notify("Totem Action", "No active Totem or Crucifix found in world.", "bad")
 			end
 		end)
-		section(worldPage, "Halloween Event & Candy")
-		toggle(worldPage, "Candy & Pumpkin Autofarm", "Continuously teleports to and collects pumpkins, candies, and gift boxes as they spawn.", state.candyAutofarm, function(v)
-			state.candyAutofarm = v
-		end)
-		button(worldPage, "Collect All Nearby Candies & Pumpkins Now", "secondary", function(b)
-			b.Text = "Collecting..."
-			task.spawn(function()
-				local collected = collectCandySweep()
-				b.Text = string.format("Collected %d objects!", collected)
-				notify("Halloween", string.format("Collected %d candy/pumpkin objects.", collected), "good")
-				task.delay(2, function()
-					if b and b.Parent then b.Text = "Collect All Nearby Candies & Pumpkins Now" end
-				end)
-			end)
-		end)
-		section(worldPage, "Quests Automation")
-		button(worldPage, "Complete & Claim All Quests", "primary", function(b)
-			b.Text = "Claiming Quests..."
-			task.spawn(function()
-				local claimed = claimAllAvailableQuests()
-				b.Text = claimed > 0 and string.format("Claimed %d Quests/Bonuses!", claimed) or "Checked (All claimed)"
-				notify("Quests", string.format("Claimed %d available quests and rewards.", claimed), "good")
-				task.delay(2, function()
-					if b and b.Parent then b.Text = "Complete & Claim All Quests" end
-				end)
-			end)
-		end)
-		section(worldPage, "Dark Magic & Expression Rituals")
+		section(worldPage, "Ancient Magic Rituals")
 		button(worldPage, "Get Expression (Triangle)", "primary", function(b)
 			b.Text = "Obtaining Expression..."
 			task.spawn(function()
@@ -4318,19 +4663,7 @@ end
 				task.delay(2.5, function() if b and b.Parent then b.Text = "Use Infinity Stones (Zombie Wanda)" end end)
 			end)
 		end)
-		section(worldPage, "Codes")
-		button(worldPage, "Redeem All Codes", "secondary", function(b)
-			b.Text = "Redeeming Codes..."
-			task.spawn(function()
-				local succ, already = redeemAllKnownCodes()
-				b.Text = string.format("Done! (%d new, %d claimed)", succ, already)
-				notify("Codes", string.format("Redeemed %d new codes. (%d already redeemed)", succ, already), succ > 0 and "good" or "sub")
-				task.delay(2.5, function()
-					if b and b.Parent then b.Text = "Redeem All Codes" end
-				end)
-			end)
-		end)
-	end
+		end
 	buildWorldPage(addTab("World", "W"))
 
 	-- ============================================================================
@@ -4715,7 +5048,7 @@ local function applyMorphInPlace(targetName)
 		local infoLbl = text(infoCard, {
 			Size = UDim2.new(1, -20, 1, 0),
 			Position = UDim2.fromOffset(12, 0),
-			Text = "Selected: Rio Vidal  ✦  Skin: The Death",
+			Text = "Selected: Rio Vidal  âœ¦  Skin: The Death",
 			TextColor3 = Color3.fromRGB(120, 255, 170),
 			Font = FONT_BOLD,
 			TextSize = 13,
@@ -4723,7 +5056,7 @@ local function applyMorphInPlace(targetName)
 		})
 		local function updateDisplay()
 			local skinTxt = (selectedSkin and selectedSkin ~= "Default") and selectedSkin or "Default"
-			infoLbl.Text = "Selected: " .. selectedChar .. "  ✦  Skin: " .. skinTxt
+			infoLbl.Text = "Selected: " .. selectedChar .. "  âœ¦  Skin: " .. skinTxt
 		end
 		-- Action Buttons
 		button(charPage, "Char Me Completely (In-Place)", "primary", function()
@@ -4753,7 +5086,7 @@ local function applyMorphInPlace(targetName)
 		tb:GetPropertyChangedSignal("Text"):Connect(function()
 			customCharInput = tb.Text
 		end)
-		button(charPage, "✦ Morph Into Typed Character ✦", "primary", function()
+		button(charPage, "âœ¦ Morph Into Typed Character âœ¦", "primary", function()
 			if customCharInput and customCharInput ~= "" then
 				selectedChar = customCharInput
 				selectedSkin = "Default"
@@ -5029,6 +5362,7 @@ local function executeSingleSpamTick(key)
 
 		if now < KW.nextDispatchAllowedAt then return end
 		if (now - (KW.keyPressedAt[key] or 0)) < 0.035 then
+			-- Allow the game's own InputBegan / HUD handler 1-2 frames to initiate cleanly without self-cancel
 			return
 		end
 
@@ -5046,11 +5380,7 @@ local function executeSingleSpamTick(key)
 		elseif AbilityController.KeyDown then
 			pcall(function() AbilityController.KeyDown:Fire(btn, key) end)
 		end
-		task.defer(function()
-			if hasActiveTargetingListener() then
-				confirmActiveAbilityListener()
-			end
-		end)
+		task.defer(confirmActiveAbilityListener)
 	elseif isHorizon then
 		pcall(function() triggerHorizonAbility(key) end)
 		pumpFastClick()
@@ -5154,7 +5484,7 @@ trackConn(RunService.RenderStepped:Connect(function()
 	KW.syncActiveHeldKey()
 	local now = os.clock()
 	local interval = (state.maxSpeed or (state.cps and state.cps >= 300)) and 0 or (1 / math.max(state.cps or 300, 1))
-	local kbSpamming = currentSpamKey and currentSpamKey ~= "Fly" and currentSpamKey ~= "Q"
+	local kbSpamming = state.outspammer and currentSpamKey and state.spamKeys[currentSpamKey] and currentSpamKey ~= "Fly" and currentSpamKey ~= "Q"
 	-- 1. Auto-Confirm Active Targeting Listeners (instant click like Netherware: works both while holding and when not holding)
 	if isNewFender and hasActiveTargetingListener() then
 		if (now - KW.lastConfirmTime) >= interval then
@@ -5182,7 +5512,6 @@ trackConn(RunService.RenderStepped:Connect(function()
 			KW.lastHudSpamTime = now
 		end
 	end
-	-- 4. Continuous M1 clicker
 	if state.mouse1Down and state.spamM1 then
 		local m1Interval = 1 / math.max(state.cps or 300, 1)
 		if (now - KW.lastM1ClickTime) >= m1Interval then
@@ -5191,101 +5520,111 @@ trackConn(RunService.RenderStepped:Connect(function()
 		end
 	end
 end))
-function KW.fixHeroesUI()
-	pcall(function()
-		local profile = getAuthoritativeProfile() or (LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild("Profile"))
-		if not profile then return end
-		local kh = profile:FindFirstChild("KeysHolder")
-		local ekh = profile:FindFirstChild("ExtraKeysHolder")
+-- On-screen HUD button hooks: track held state (including MobileKeys & hold-while-ragdolled)
+local hookedHudContainers = setmetatable({}, { __mode = "k" })
+local registeredHudButtons = {} -- [abilityName] = guiButton
 
-		-- 1. Format & Center KeysHolder so all 6 buttons (Q, R, F, Z, X, C) fit cleanly without C overflowing
-		if kh then
-			kh.AnchorPoint = Vector2.new(0.5, 0)
-			kh.Position = UDim2.new(0.5, 0, 0.805, 0)
-			kh.Size = UDim2.new(0.395, 0, 0.155, 0)
-
-			local keyOrder = { "Q", "R", "F", "Z", "X", "C" }
-			for i, name in ipairs(keyOrder) do
-				local b = kh:FindFirstChild(name)
-				if b and b:IsA("GuiObject") then
-					b.Size = UDim2.new(0.148, 0, 0.743, 0)
-					b.Position = UDim2.new((i - 1) * 0.168, 0, 0.257, 0)
-				end
-			end
-		end
-
-		-- 2. Keep ExtraKeysHolder on the side (Left or Right per user game settings)
-		if ekh then
-			local layout = ekh:FindFirstChildOfClass("UIListLayout")
-			if layout then
-				layout.FillDirection = Enum.FillDirection.Vertical
-				layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-				layout.VerticalAlignment = Enum.VerticalAlignment.Top
-				layout.Padding = UDim.new(0, 8)
-			end
-			for _, b in ipairs(ekh:GetChildren()) do
-				if b:IsA("GuiObject") then
-					local lbl = b:FindFirstChild("KeyNumLabel")
-					if lbl then lbl:Destroy() end
-				end
-			end
-			local isRight = false
-			pcall(function()
-				local ps = LocalPlayer:FindFirstChild("PlayerScripts")
-				local sc = ps and ps:FindFirstChild("Client") and ps.Client:FindFirstChild("Controllers") and ps.Client.Controllers:FindFirstChild("SettingsController")
-				if sc then
-					local sMod = require(sc)
-					if sMod and sMod.GetLocalSetting then
-						isRight = sMod:GetLocalSetting("ExtraSpellsRight") == true
-					end
+local function registerHudAbilityButton(btn, abilityName)
+	if not btn or not btn:IsA("GuiObject") then return end
+	if not abilityName or abilityName == "" or abilityName == "Button" then return end
+	registeredHudButtons[abilityName] = btn
+	if KW.hudHooked[btn] then return end
+	KW.hudHooked[btn] = true
+	trackConn(btn.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			local now = os.clock()
+			KW.heldHudButtons[abilityName] = true
+			KW.keyPressedAt[abilityName] = now
+			KW.recentSpamConfirmUntil = now + 0.2
+			KW.pushHeldKey(abilityName, true)
+			local conn
+			conn = input:GetPropertyChangedSignal("UserInputState"):Connect(function()
+				if input.UserInputState == Enum.UserInputState.End or input.UserInputState == Enum.UserInputState.Cancel then
+					conn:Disconnect()
+					KW.heldHudButtons[abilityName] = nil
+					KW.popHeldKey(abilityName)
+					sendRelease(abilityName, false)
 				end
 			end)
-			ekh.AnchorPoint = Vector2.new(isRight and 1 or 0, 0)
-			ekh.Position = UDim2.new(isRight and 0.992 or 0.008, 0, 0.3, 0)
-			ekh.Size = UDim2.new(0.0509823933, 0, 0.399366647, 0)
 		end
-	end)
+	end))
 end
 
--- On-screen HUD button hooks: track held state & allow unequip tap
+local function hookHudContainer(container, isMobileIcons)
+	if not container then return end
+	local function handleChild(child)
+		if not child:IsA("GuiObject") then return end
+		if isMobileIcons then
+			local btn = child:FindFirstChild("Button") or child
+			registerHudAbilityButton(btn, child.Name)
+		else
+			registerHudAbilityButton(child, child.Name)
+		end
+	end
+	for _, child in ipairs(container:GetChildren()) do
+		handleChild(child)
+	end
+	if not hookedHudContainers[container] then
+		hookedHudContainers[container] = true
+		trackConn(container.ChildAdded:Connect(handleChild))
+	end
+end
+
 local function hookHudButtons()
 	pcall(KW.fixHeroesUI)
 	if not isNewFender then return end
+	table.clear(registeredHudButtons)
 	local profile = getAuthoritativeProfile()
 	if not profile then return end
-	local holders = {
-		profile:FindFirstChild("TemplateKeysHolder") or profile:FindFirstChild("KeysHolder"),
-		profile:FindFirstChild("TemplateExtraKeysHolder") or profile:FindFirstChild("ExtraKeysHolder"),
-	}
-	for _, holder in ipairs(holders) do
-		if holder then
-			for _, btn in ipairs(holder:GetChildren()) do
-				if btn:IsA("GuiObject") and not KW.hudHooked[btn] then
-					KW.hudHooked[btn] = true
-					local abilityName = btn.Name
-					trackConn(btn.InputBegan:Connect(function(input)
-						if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-							local now = os.clock()
-							KW.heldHudButtons[abilityName] = true
-							KW.keyPressedAt[abilityName] = now
-							KW.recentSpamConfirmUntil = now + 0.2
-							KW.pushHeldKey(abilityName, true)
-							local conn
-							conn = input:GetPropertyChangedSignal("UserInputState"):Connect(function()
-								if input.UserInputState == Enum.UserInputState.End or input.UserInputState == Enum.UserInputState.Cancel then
-									conn:Disconnect()
-									KW.heldHudButtons[abilityName] = nil
-									KW.popHeldKey(abilityName)
-									sendRelease(abilityName, false)
-								end
-							end)
-						end
-					end))
-				end
+	hookHudContainer(profile:FindFirstChild("TemplateKeysHolder") or profile:FindFirstChild("KeysHolder"), false)
+	hookHudContainer(profile:FindFirstChild("TemplateExtraKeysHolder") or profile:FindFirstChild("ExtraKeysHolder"), false)
+	local mk = profile:FindFirstChild("MobileKeys", true)
+	if mk then
+		hookHudContainer(mk:FindFirstChild("AbilityIcons") or mk, true)
+	end
+	if not hookedHudContainers[profile] then
+		hookedHudContainers[profile] = true
+		trackConn(profile.ChildAdded:Connect(function(child)
+			if child.Name == "TemplateKeysHolder" or child.Name == "KeysHolder"
+				or child.Name == "TemplateExtraKeysHolder" or child.Name == "ExtraKeysHolder" then
+				task.defer(hookHudButtons)
+			elseif child.Name == "MobileKeys" then
+				task.defer(hookHudButtons)
+			end
+		end))
+	end
+end
+
+-- Touch hit-test fallback so holding a mobile ability button works even when Cooldown/Ragdoll overlay covers it
+trackConn(UserInputService.TouchStarted:Connect(function(touch)
+	if not isNewFender or not state.outspammer then return end
+	local pos = touch.Position
+	for abilityName, btn in pairs(registeredHudButtons) do
+		if btn and btn.Parent and btn.Visible then
+			local ap = btn.AbsolutePosition
+			local as = btn.AbsoluteSize
+			if as.X > 0 and as.Y > 0
+				and pos.X >= ap.X and pos.X <= (ap.X + as.X)
+				and pos.Y >= ap.Y and pos.Y <= (ap.Y + as.Y) then
+				local now = os.clock()
+				KW.heldHudButtons[abilityName] = true
+				KW.keyPressedAt[abilityName] = now
+				KW.recentSpamConfirmUntil = now + 0.2
+				KW.pushHeldKey(abilityName, true)
+				local conn
+				conn = touch:GetPropertyChangedSignal("UserInputState"):Connect(function()
+					if touch.UserInputState == Enum.UserInputState.End or touch.UserInputState == Enum.UserInputState.Cancel then
+						conn:Disconnect()
+						KW.heldHudButtons[abilityName] = nil
+						KW.popHeldKey(abilityName)
+						sendRelease(abilityName, false)
+					end
+				end)
+				break
 			end
 		end
 	end
-end
+end))
 
 task.defer(function()
 	pcall(KW.fixHeroesUI)
@@ -5560,18 +5899,8 @@ trackConn(RunService.RenderStepped:Connect(function()
 	end
 end))
 local lastVisuals = 0
-local lastCandyFarm = 0
-local isCandyFarmSweeping = false
 trackConn(RunService.Heartbeat:Connect(function()
 	local now = os.clock()
-	if state.candyAutofarm and not isCandyFarmSweeping and (now - lastCandyFarm >= 5.0) then
-		lastCandyFarm = now
-		isCandyFarmSweeping = true
-		task.spawn(function()
-			pcall(collectCandySweep)
-			isCandyFarmSweeping = false
-		end)
-	end
 	if now - lastVisuals < 0.08 then return end
 	lastVisuals = now
 	pcall(updateVisuals)
@@ -6793,14 +7122,29 @@ end
 -- AUTO ESCAPE PENDANT (ONLY WHEN TRAPPED AS VICTIM BY FREYA EK5)
 -- ================================================================
 performInstantPendantEscape = function()
-	if not state.autoEscapePendant or not KW.isVictimTrappedInPendant() then return end
+	if not isNewFenderGame or not state.autoEscapePendant or not KW.isVictimTrappedInPendant() then return end
 	local now = os.clock()
 	if now - (KW.lastPendantEscapeAttemptAt or 0) < 0.14 then return end
 	KW.lastPendantEscapeAttemptAt = now
 	local ws = game:GetService("Workspace")
 	local c = LocalPlayer.Character
 	local hrp = c and c:FindFirstChild("HumanoidRootPart")
-	local pt = ws:FindFirstChild("Map") and ws.Map:FindFirstChild("Dimension") and ws.Map.Dimension:FindFirstChild("PendantTrap")
+	if not hrp then return end
+
+	-- Exclude Davina
+	local nt = tostring(c:GetAttribute("NameTag") or c:GetAttribute("Name") or c:GetAttribute("DisplayTag") or ""):lower()
+	if nt:find("harvest", 1, true) or nt:find("davina", 1, true) then
+		return
+	end
+
+	-- Double-check physical location inside PendantTrap dimension
+	local map = ws:FindFirstChild("Map")
+	local dim = map and map:FindFirstChild("Dimension")
+	local pt = dim and dim:FindFirstChild("PendantTrap")
+	local ptPos = (pt and pt:GetPivot().Position) or Vector3.new(1081.49, 120.57, -1089.62)
+	if (hrp.Position - ptPos).Magnitude > 180 then
+		return
+	end
 	local redDoor = (pt and pt:FindFirstChild("Doors") and pt.Doors:FindFirstChild("RedDoor"))
 		or (pt and pt:FindFirstChild("RedDoor", true))
 		or ws:FindFirstChild("RedDoor", true)
@@ -6884,7 +7228,7 @@ task.spawn(function()
 			end)
 		end
 	end))
-	while state.alive do
+	while state.alive and isNewFenderGame do
 		task.wait(0.08)
 		if state.autoEscapePendant and KW.isVictimTrappedInPendant() then
 			performInstantPendantEscape()
