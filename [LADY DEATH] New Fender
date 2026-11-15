@@ -290,6 +290,10 @@ local state = {
 	alwaysAllowReset = true,       -- Always Allow Reset in Esc menu (ON by default)
 	fpsBooster = false,            -- FPS booster toggle
 	ownAllCharacters = false,      -- Unlock all characters in menu toggle
+	killAutofarm = false,          -- Kill Autofarm master toggle
+	killFarmLocation = "Same Spot",-- Target farm location ("Same Spot", "Spawn", or any Dimension)
+	autoDieOnHit = true,           -- Auto die when hit while Kill Autofarm is active
+	autoSpawnNewChar = true,       -- Auto spawn as a new character after dying
 	spamKeys = {},
 	customRangeEnabled = isNewFender,
 	customRangeDistance = 150,
@@ -2987,6 +2991,36 @@ local function initInterface()
 		toggle(combatPage, "Auto Escape Pendant", "Automatically scores 100% Perfect to escape and win the Pendant Banish battle.", state.autoEscapePendant, function(v)
 			state.autoEscapePendant = v
 		end)
+
+		if isNewFenderGame then
+			section(combatPage, "Kill Autofarm")
+			toggle(combatPage, "Kill Autofarm", "Instantly dies when hit, auto-spawns a new character, and returns to the same spot or chosen location.", state.killAutofarm, function(v)
+				state.killAutofarm = v
+				if v then
+					local c = LocalPlayer.Character
+					local hrp = c and c:FindFirstChild("HumanoidRootPart")
+					local hum = c and c:FindFirstChildOfClass("Humanoid")
+					KW.killFarmLastChar = c
+					KW.killFarmLastHp = hum and hum.Health or nil
+					if hrp then KW.killFarmDeathCF = hrp.CFrame end
+				end
+			end)
+			local farmLocs = { "Same Spot", "Spawn" }
+			local seenLoc = { ["Same Spot"] = true, Spawn = true }
+			local dimList = KW.getAllDimensionNames and KW.getAllDimensionNames() or { "Pendant", "Descensum", "Ghost Place" }
+			for _, dName in ipairs(dimList) do
+				if not seenLoc[dName] then
+					seenLoc[dName] = true
+					table.insert(farmLocs, dName)
+				end
+			end
+			choice(combatPage, "Farm Location", farmLocs, state.killFarmLocation or "Same Spot", function(v)
+				state.killFarmLocation = v
+				if state.killAutofarm and KW.teleportToFarmLocation then
+					KW.teleportToFarmLocation(v)
+				end
+			end)
+		end
 	end
 	buildCombatPage(addTab("Combat", "C"))
 
@@ -4464,12 +4498,17 @@ end
 		end)
 		if isNewFenderGame then
 			section(worldPage, "Dimension Teleports")
-			button(worldPage, "Teleport to Pendant", "primary", function()
-				KW.teleportToDimension("Pendant")
+			button(worldPage, "Teleport to Spawn", "primary", function()
+				if KW.teleportToRegularSpawn then
+					KW.teleportToRegularSpawn()
+				end
 			end)
-			button(worldPage, "Teleport to Desceneum", "primary", function()
-				KW.teleportToDimension("Descensum")
-			end)
+			local dimNames = KW.getAllDimensionNames and KW.getAllDimensionNames() or { "Pendant", "Descensum", "Ghost Place" }
+			for _, dName in ipairs(dimNames) do
+				button(worldPage, "Teleport to " .. dName, "primary", function()
+					KW.teleportToDimension(dName)
+				end)
+			end
 		elseif isHeroesOnlineWorld then
 			section(worldPage, "Heroes World Teleports")
 			local howLocations = {
@@ -6692,14 +6731,66 @@ do
 		return nil
 	end
 
-	local function resolveDimensionCF(kind)
-		local fallbackCF = (kind == "Pendant")
-			and CFrame.new(1081.5, 121.0, -1089.6)
-			or CFrame.new(-330.7, 122.5, 66.5)
-
+	KW.getAllDimensionNames = function()
+		local list = { "Pendant", "Descensum", "Ghost Place" }
+		local seen = { Pendant = true, PendantTrap = true, Descensum = true, ["Ghost Place"] = true, GhostPlace = true }
 		local map = workspace:FindFirstChild("Map")
 		local dim = map and map:FindFirstChild("Dimension")
-		if kind == "Pendant" then
+		if dim then
+			for _, child in ipairs(dim:GetChildren()) do
+				if (child:IsA("Model") or child:IsA("Folder")) and not seen[child.Name] then
+					seen[child.Name] = true
+					table.insert(list, child.Name)
+				end
+			end
+		end
+		return list
+	end
+
+	KW.teleportToRegularSpawn = function()
+		local c = LocalPlayer.Character
+		local hrp = c and (c.PrimaryPart or c:FindFirstChild("HumanoidRootPart"))
+		if not hrp then
+			notify("Spawn", "Character not ready", "warn")
+			return false
+		end
+		local spawns = {}
+		local map = workspace:FindFirstChild("Map")
+		local spFolder = map and map:FindFirstChild("Spawn")
+		local searchRoot = spFolder or workspace
+		for _, d in ipairs(searchRoot:GetDescendants()) do
+			if d:IsA("SpawnLocation") and d.Enabled ~= false then
+				table.insert(spawns, d)
+			end
+		end
+		if #spawns == 0 and searchRoot ~= workspace then
+			for _, d in ipairs(workspace:GetDescendants()) do
+				if d:IsA("SpawnLocation") and d.Enabled ~= false then
+					table.insert(spawns, d)
+				end
+			end
+		end
+		if #spawns == 0 then
+			notify("Spawn", "No regular SpawnLocation found", "warn")
+			return false
+		end
+		local chosen = spawns[math.random(1, #spawns)]
+		state.inSafeSpot = false
+		removeSafeRoom()
+		KW.markIntentionalTp(2.5)
+		c:PivotTo(chosen.CFrame + Vector3.new(0, 4, 0))
+		hrp.AssemblyLinearVelocity = Vector3.zero
+		notify("Spawn", "Teleported to regular spawn location", "good")
+		return true
+	end
+
+	local function resolveDimensionCF(kind)
+		local fallbackCF = (kind == "Pendant" or kind == "PendantTrap")
+			and CFrame.new(1081.5, 121.0, -1089.6)
+			or CFrame.new(-330.7, 122.5, 66.5)
+		local map = workspace:FindFirstChild("Map")
+		local dim = map and map:FindFirstChild("Dimension")
+		if kind == "Pendant" or kind == "PendantTrap" then
 			local root = (dim and dim:FindFirstChild("PendantTrap")) or workspace:FindFirstChild("PendantTrap", true)
 			if root then
 				local vs = root:FindFirstChild("VictimSpawn")
@@ -6714,7 +6805,7 @@ do
 				end
 			end
 			return fallbackCF
-		else
+		elseif kind == "Descensum" then
 			local root = (dim and dim:FindFirstChild("Descensum")) or workspace:FindFirstChild("Descensum", true)
 			if root then
 				local bestFloor = nil
@@ -6731,6 +6822,39 @@ do
 				if bestFloor then
 					local y = math.clamp(bestFloor.Position.Y + bestFloor.Size.Y * 0.5 + 3.5, 120.5, 134.5)
 					return CFrame.new(bestFloor.Position.X, y, bestFloor.Position.Z)
+				end
+			end
+			return fallbackCF
+		else
+			local targetName = (kind == "Ghost Place") and "GhostPlace" or kind
+			local root = (dim and (dim:FindFirstChild(targetName) or dim:FindFirstChild(kind)))
+				or workspace:FindFirstChild(targetName, true)
+				or workspace:FindFirstChild(kind, true)
+			if root then
+				if root:IsA("BasePart") then
+					return root.CFrame + Vector3.new(0, root.Size.Y * 0.5 + 3.5, 0)
+				end
+				local sp = root:FindFirstChild("Spawn", true) or root:FindFirstChild("VictimSpawn", true) or root:FindFirstChildWhichIsA("SpawnLocation", true)
+				if sp and sp:IsA("BasePart") then
+					return sp.CFrame + Vector3.new(0, sp.Size.Y * 0.5 + 3.5, 0)
+				end
+				local bestFloor, bestArea = nil, 0
+				local anyPart = nil
+				for _, d in ipairs(root:GetDescendants()) do
+					if d:IsA("BasePart") then
+						if not anyPart then anyPart = d end
+						if d.CanCollide then
+							local area = d.Size.X * d.Size.Z
+							if area > bestArea then
+								bestArea = area
+								bestFloor = d
+							end
+						end
+					end
+				end
+				local chosenPart = bestFloor or anyPart
+				if chosenPart then
+					return CFrame.new(chosenPart.Position.X, chosenPart.Position.Y + chosenPart.Size.Y * 0.5 + 3.5, chosenPart.Position.Z)
 				end
 			end
 			return fallbackCF
@@ -6769,6 +6893,173 @@ do
 		end)
 		return true, targetCF
 	end
+
+	KW.teleportToFarmLocation = function(loc)
+		loc = loc or state.killFarmLocation or "Same Spot"
+		if loc == "Same Spot" then
+			local c = LocalPlayer.Character
+			local hrp = c and (c.PrimaryPart or c:FindFirstChild("HumanoidRootPart"))
+			if hrp and KW.killFarmDeathCF then
+				KW.markIntentionalTp(2.5)
+				c:PivotTo(KW.killFarmDeathCF)
+				hrp.AssemblyLinearVelocity = Vector3.zero
+				return true
+			end
+			return false
+		end
+		if loc == "Spawn" then
+			return KW.teleportToRegularSpawn and KW.teleportToRegularSpawn() or false
+		end
+		return KW.teleportToDimension and KW.teleportToDimension(loc) or false
+	end
+
+	local cachedCharService = nil
+	local cachedMeleeService = nil
+	local function getKnitModule()
+		local rs = game:GetService("ReplicatedStorage")
+		local mods = rs:FindFirstChild("Modules")
+		local knitFolder = mods and mods:FindFirstChild("Knit")
+		local kc = knitFolder and knitFolder:FindFirstChild("KnitClient")
+		if kc and kc:IsA("ModuleScript") then return kc end
+		local pkg = rs:FindFirstChild("Packages")
+		local pk = pkg and pkg:FindFirstChild("Knit")
+		if pk and pk:IsA("ModuleScript") then return pk end
+		local anyKc = rs:FindFirstChild("KnitClient", true)
+		if anyKc and anyKc:IsA("ModuleScript") then return anyKc end
+		return nil
+	end
+	local function getCharacterService()
+		if cachedCharService then return cachedCharService end
+		pcall(function()
+			local knitMod = getKnitModule()
+			if knitMod then
+				local Knit = require(knitMod)
+				if Knit and Knit.GetService then
+					cachedCharService = Knit.GetService("CharacterService")
+				end
+			end
+		end)
+		return cachedCharService
+	end
+	local function getMeleeService()
+		if cachedMeleeService then return cachedMeleeService end
+		pcall(function()
+			local knitMod = getKnitModule()
+			if knitMod then
+				local Knit = require(knitMod)
+				if Knit and Knit.GetService then
+					cachedMeleeService = Knit.GetService("MeleeService")
+				end
+			end
+		end)
+		return cachedMeleeService
+	end
+
+	KW.spawnNewCharacter = function(sameCharName)
+		local cs = getCharacterService()
+		if not cs or not cs.Spawner then return false end
+		local chosen = sameCharName
+		if not chosen or chosen == "" or chosen == LocalPlayer.Name then
+			if not KW.ownedCharactersCache or #KW.ownedCharactersCache == 0 then
+				local ok, owned = pcall(function() return cs:GetOwnedCharacters() end)
+				if ok and type(owned) == "table" and #owned > 0 then
+					KW.ownedCharactersCache = owned
+				end
+			end
+			local pool = KW.ownedCharactersCache
+			if type(pool) == "table" and #pool > 0 then
+				chosen = pool[1]
+			else
+				chosen = "ScarletWitch"
+			end
+		end
+		pcall(function() cs.Spawner:Fire(chosen) end)
+		return true
+	end
+
+	KW.killFarmCanSpawn = false
+	pcall(function()
+		local rs = game:GetService("ReplicatedStorage")
+		local ds = rs:FindFirstChild("Modules") and rs.Modules:FindFirstChild("Knit")
+			and rs.Modules.Knit:FindFirstChild("Services")
+			and rs.Modules.Knit.Services:FindFirstChild("DeathService")
+		local gts = ds and ds:FindFirstChild("RE") and ds.RE:FindFirstChild("GoToSelection")
+		if gts and gts:IsA("RemoteEvent") then
+			trackConn(gts.OnClientEvent:Connect(function()
+				KW.killFarmCanSpawn = true
+			end))
+		end
+	end)
+
+	trackConn(LocalPlayer.CharacterAdded:Connect(function(newChar)
+		KW.killFarmLastChar = newChar
+		KW.killFarmLastHp = nil
+		KW.killFarmDyingChar = nil
+		KW.killFarmCanSpawn = false
+		if state.killAutofarm then
+			task.delay(0.45, function()
+				if state.killAutofarm and LocalPlayer.Character == newChar then
+					if KW.teleportToFarmLocation then
+						KW.teleportToFarmLocation(state.killFarmLocation or "Same Spot")
+					end
+					-- Try casting a quick move + swing after spawn to drop SpawnProtected if server allows it
+					task.delay(0.35, function()
+						if state.killAutofarm and LocalPlayer.Character == newChar then
+							pcall(function()
+								if AbilityController and AbilityController._keyDown then
+									AbilityController._keyDown(nil, "Z")
+								end
+								local ms = getMeleeService()
+								if ms and ms.Swing then ms.Swing:Fire() end
+							end)
+						end
+					end)
+				end
+			end)
+		end
+	end))
+
+	trackConn(RunService.Heartbeat:Connect(function()
+		if not state.alive or not isNewFenderGame or not state.killAutofarm then return end
+		local now = os.clock()
+		local c = LocalPlayer.Character
+		local hrp = c and c:FindFirstChild("HumanoidRootPart")
+		local hum = c and c:FindFirstChildOfClass("Humanoid")
+
+		-- 1. Auto Spawn Same Character once DeathService.GoToSelection fires (or 5.4s fallback)
+		if not c or not c.Parent or not hrp or not hum or hum.Health <= 0 then
+			local waited = now - (KW.killFarmDiedAt or 0)
+			if (KW.killFarmCanSpawn or waited >= 5.4) and (now - (KW.lastAutoSpawnAt or 0)) >= 0.5 then
+				KW.lastAutoSpawnAt = now
+				KW.spawnNewCharacter(KW.killFarmLastDiedCharName)
+			end
+			return
+		end
+
+		-- 2. Auto Die on Hit (waits 0.15s for server damage tag, then sets Health = 0 cleanly like Reset)
+		if KW.killFarmLastChar ~= c then
+			KW.killFarmLastChar = c
+			KW.killFarmLastHp = hum.Health
+		elseif KW.killFarmDyingChar ~= c then
+			local prevHp = KW.killFarmLastHp or hum.Health
+			local damagedAttr = tonumber(c:GetAttribute("Damaged")) or 0
+			if hum.Health < (prevHp - 0.1) or (damagedAttr > 0 and hum.Health < hum.MaxHealth) then
+				KW.killFarmDyingChar = c
+				KW.killFarmDeathCF = hrp.CFrame
+				KW.killFarmLastDiedCharName = c:GetAttribute("NameTag") or KW.killFarmLastDiedCharName
+				KW.killFarmDiedAt = now
+				KW.killFarmCanSpawn = false
+				task.delay(0.15, function()
+					if state.killAutofarm and LocalPlayer.Character == c and hum.Parent then
+						KW.killFarmDiedAt = os.clock()
+						hum.Health = 0
+					end
+				end)
+				return
+			end
+			KW.killFarmLastHp = hum.Health
+		end
+	end))
 
 	KW.activeSummonSpots = KW.activeSummonSpots or {}
 
