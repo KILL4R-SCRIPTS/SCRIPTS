@@ -95,8 +95,6 @@ local state = {
 	spamKey = Enum.KeyCode.F,
 	safeCps = 16,
 	spamRange = 240,
-	hitboxExpand = true,
-	hitboxPadding = 12,
 	autoHexecute = true,
 	excludeFriends = true,
 	-- Bypasses
@@ -301,15 +299,10 @@ applyAutoclickerBypass(state.clickGuardBypass)
 local origResolveMouseTarget = nil
 local origGetTargetModel = nil
 local origAssistRadius = nil
-local origHitboxPadding = nil
-local origTouchAssistRadius = nil
 local function getEffectiveAimRange()
 	local ab = TargetAssistMod and TargetAssistMod.EquippedAbility
 	local cfg = (type(ab) == "string" and AbilityConfig) and AbilityConfig[ab] or nil
 	if type(cfg) == "table" and tonumber(cfg.Range) and cfg.Range > 0 then
-		if state.hitboxExpand then
-			return math.max(state.spamRange, cfg.Range)
-		end
 		return math.min(state.spamRange, cfg.Range)
 	end
 	return state.spamRange
@@ -317,12 +310,10 @@ end
 
 if TargetAssistMod then
 	origAssistRadius = TargetAssistMod.ASSIST_RADIUS
-	origHitboxPadding = TargetAssistMod.HITBOX_PADDING
-	origTouchAssistRadius = TargetAssistMod.TOUCH_ASSIST_RADIUS
 	if type(TargetAssistMod.ResolveMouseTarget) == "function" then
 		origResolveMouseTarget = TargetAssistMod.ResolveMouseTarget
 		TargetAssistMod.ResolveMouseTarget = function(self, ...)
-			if (state.silentAim and state.equippedSpammer) or state.hitboxExpand then
+			if state.silentAim and state.equippedSpammer then
 				local t = getNearestTarget(getEffectiveAimRange())
 				local thrp = t and getHRP(t)
 				if thrp then
@@ -335,8 +326,8 @@ if TargetAssistMod then
 	if type(TargetAssistMod.GetTargetModel) == "function" then
 		origGetTargetModel = TargetAssistMod.GetTargetModel
 		TargetAssistMod.GetTargetModel = function(arg16, ...)
-			if (state.silentAim and state.equippedSpammer) or state.hitboxExpand then
-				local r = state.hitboxExpand and getEffectiveAimRange() or ((type(arg16) == "number" and arg16 > 0) and math.min(arg16, getEffectiveAimRange()) or getEffectiveAimRange())
+			if state.silentAim and state.equippedSpammer then
+				local r = (type(arg16) == "number" and arg16 > 0) and math.min(arg16, getEffectiveAimRange()) or getEffectiveAimRange()
 				local t = getNearestTarget(r)
 				if t then return t end
 			end
@@ -535,6 +526,9 @@ trackConn(UserInputService.InputBegan:Connect(function(input, gpe)
 end))
 
 local lastCastAck = {}
+trackConn(LocalPlayer.CharacterAdded:Connect(function()
+	table.clear(lastCastAck)
+end))
 
 local function hasAbilityType(cfg, typeName)
 	if type(cfg) == "table" then
@@ -566,7 +560,7 @@ local function tryOutspamStep()
 	local hum = c and c:FindFirstChildOfClass("Humanoid")
 	if not c or not hum or hum.Health <= 0 then return end
 	local abName = getEquippedAbilityName()
-	if not abName or abName == "Levitation" then return end
+	if not abName or abName == "Levitation" or abName == "Channel Magic" then return end
 	local now = os.clock()
 	local cds = c:FindFirstChild("Cooldowns")
 	if cds and cds:FindFirstChild(abName) then
@@ -574,6 +568,13 @@ local function tryOutspamStep()
 		return
 	end
 	local cfg = AbilityConfig and AbilityConfig[abName]
+	if hasAbilityType(cfg, "Hold") then return end
+	local stNow = workspace:GetServerTimeNow()
+	local inCombo = c:GetAttribute("InComboUntil")
+	local cueEnds = c:GetAttribute("ComboCueEnds")
+	if (type(inCombo) == "number" and inCombo > stNow) or (type(cueEnds) == "number" and cueEnds > stNow) then
+		return
+	end
 	if type(cfg) == "table" and tonumber(cfg.MagicRequirement) and cfg.MagicRequirement > 0 then
 		local cv = c:FindFirstChild("CharacterValues")
 		local mVal = cv and cv:FindFirstChild("Magic")
@@ -607,16 +608,8 @@ trackConn(RunService.RenderStepped:Connect(function()
 end))
 
 trackConn(RunService.Heartbeat:Connect(function()
-	if TargetAssistMod then
-		if origAssistRadius then
-			TargetAssistMod.ASSIST_RADIUS = (state.silentAim or state.hitboxExpand) and math.max(state.spamRange, 250) or origAssistRadius
-		end
-		if origHitboxPadding ~= nil then
-			TargetAssistMod.HITBOX_PADDING = state.hitboxExpand and (state.hitboxPadding or 12) or origHitboxPadding
-		end
-		if origTouchAssistRadius ~= nil then
-			TargetAssistMod.TOUCH_ASSIST_RADIUS = state.hitboxExpand and 0.65 or origTouchAssistRadius
-		end
+	if TargetAssistMod and origAssistRadius then
+		TargetAssistMod.ASSIST_RADIUS = state.silentAim and math.max(state.spamRange, 200) or origAssistRadius
 	end
 	local c = LocalPlayer.Character
 	local hum = c and c:FindFirstChildOfClass("Humanoid")
@@ -1753,8 +1746,6 @@ combatSec:Keybind(nextFlag("SpamKey"), "Toggle Spammer Key", { Default = state.s
 end)
 toggle(combatSec, "Auto-Aim Nearest Target", state.silentAim, function(v) state.silentAim = v end)
 slider(combatSec, "Target Range", 30, 500, 10, state.spamRange, function(v) state.spamRange = v end)
-toggle(combatSec, "Hitbox Expander (Further Clicks)", state.hitboxExpand, function(v) state.hitboxExpand = v end)
-slider(combatSec, "Hitbox Size", 2, 30, 1, state.hitboxPadding, function(v) state.hitboxPadding = v end)
 toggle(combatSec, "Auto Hexecute Knocked", state.autoHexecute, function(v) state.autoHexecute = v end)
 toggle(combatSec, "Exclude Friends", state.excludeFriends, function(v) state.excludeFriends = v end)
 
@@ -2012,8 +2003,6 @@ _G.KayWareEOWCleanup = function()
 		if origResolveMouseTarget then TargetAssistMod.ResolveMouseTarget = origResolveMouseTarget end
 		if origGetTargetModel then TargetAssistMod.GetTargetModel = origGetTargetModel end
 		if origAssistRadius then TargetAssistMod.ASSIST_RADIUS = origAssistRadius end
-		if origHitboxPadding ~= nil then TargetAssistMod.HITBOX_PADDING = origHitboxPadding end
-		if origTouchAssistRadius ~= nil then TargetAssistMod.TOUCH_ASSIST_RADIUS = origTouchAssistRadius end
 	end
 	stopFly()
 	applyFullbright(false)
