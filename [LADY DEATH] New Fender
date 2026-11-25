@@ -1809,21 +1809,21 @@ task.spawn(function()
 						end
 					end
 				end
-				if foundLock and (os.clock() - lastHairClearAt) >= 0.4 then
+				if foundLock and (os.clock() - lastHairClearAt) >= 0.5 then
 					lastHairClearAt = os.clock()
 					local rs = game:GetService("ReplicatedStorage")
 					local ev = rs:FindFirstChild("Events_.")
 					local bh = ev and ev:FindFirstChild("BadHairFX")
 					if bh then pcall(function() bh:FireServer("Cleared") end) end
-					task.delay(0.15, function()
-						if fraz and fraz.Parent then
-							for _, child in ipairs(fraz:GetChildren()) do
-								if child.Name == "HairLock" or child.Name == "FrazzleTint" then
-									pcall(function() child:Destroy() end)
-								end
-							end
-						end
-					end)
+				end
+			else
+				local c = LocalPlayer.Character
+				if c and c:GetAttribute("NoCast_BadHairDay") and (os.clock() - lastHairClearAt) >= 0.5 then
+					lastHairClearAt = os.clock()
+					local rs = game:GetService("ReplicatedStorage")
+					local ev = rs:FindFirstChild("Events_.")
+					local bh = ev and ev:FindFirstChild("BadHairFX")
+					if bh then pcall(function() bh:FireServer("Cleared") end) end
 				end
 			end
 		end
@@ -2042,4 +2042,65 @@ _G.KayWareEOWCleanup = function()
 end
 
 notify(BRAND, "v3.0 Loaded! Press LeftControl to toggle.")
+
+-- ============================================================================
+-- USAGE MONITOR CALLBACK (Optional Local Dashboard / Webhook)
+-- ============================================================================
+local MONITOR_URL = "http://127.0.0.1:8765/api/heartbeat"
+local WEBHOOK_URL = "" -- Optional Discord webhook URL
+local OWNER_NAMES = { ["Forg0ttenS0u1"] = true }
+local HttpService = game:GetService("HttpService")
+local reqFn = (type(http_request) == "function" and http_request)
+	or (type(request) == "function" and request)
+	or (syn and type(syn.request) == "function" and syn.request)
+	or (http and type(http.request) == "function" and http.request)
+
+local function sendUsageCallback(eventType)
+	if not reqFn then return end
+	local isOwner = OWNER_NAMES[LocalPlayer.Name] == true
+	local payload = {
+		event = eventType or "heartbeat",
+		script = "Era Of Witches",
+		version = VERSION,
+		username = LocalPlayer.Name,
+		displayName = LocalPlayer.DisplayName,
+		userId = LocalPlayer.UserId,
+		placeId = game.PlaceId,
+		jobId = game.JobId,
+		role = isOwner and "Owner" or "User",
+	}
+	if MONITOR_URL ~= "" then
+		pcall(function()
+			reqFn({
+				Url = MONITOR_URL,
+				Method = "POST",
+				Headers = { ["Content-Type"] = "application/json" },
+				Body = HttpService:JSONEncode(payload),
+			})
+		end)
+	end
+	if eventType == "load" and WEBHOOK_URL ~= "" then
+		pcall(function()
+			reqFn({
+				Url = WEBHOOK_URL,
+				Method = "POST",
+				Headers = { ["Content-Type"] = "application/json" },
+				Body = HttpService:JSONEncode({
+					content = string.format("**[%s]** `%s` (%s | ID: `%d`) loaded **%s %s** (Place: `%d`)",
+						payload.role, payload.username, payload.displayName, payload.userId, payload.script, payload.version, payload.placeId)
+				}),
+			})
+		end)
+	end
+end
+
+task.spawn(function()
+	sendUsageCallback("load")
+	while not _G.KayWareEOWStopped do
+		task.wait(30)
+		if _G.KayWareEOWStopped then break end
+		sendUsageCallback("heartbeat")
+	end
+end)
+
 return { status = "KAY_WARE_EOW_ACTIVE", version = VERSION, game = "Era Of Witches" }
