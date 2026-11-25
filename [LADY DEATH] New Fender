@@ -179,13 +179,15 @@ local function safeTeleport(posOrCFrame)
 	hrp.AssemblyAngularVelocity = Vector3.zero
 	c:PivotTo(targetCF)
 	local endPos = targetCF.Position
-	task.delay(0.12, function()
-		if hrp and hrp.Parent and (hrp.Position - endPos).Magnitude > 12 then
-			hrp.AssemblyLinearVelocity = Vector3.zero
-			hrp.AssemblyAngularVelocity = Vector3.zero
-			c:PivotTo(targetCF)
-		end
-	end)
+	for _, delaySec in ipairs({ 0.10, 0.25, 0.45 }) do
+		task.delay(delaySec, function()
+			if hrp and hrp.Parent and (hrp.Position - endPos).Magnitude > 12 then
+				hrp.AssemblyLinearVelocity = Vector3.zero
+				hrp.AssemblyAngularVelocity = Vector3.zero
+				c:PivotTo(targetCF)
+			end
+		end)
+	end
 	return true
 end
 
@@ -325,13 +327,12 @@ if TargetAssistMod then
 	end
 	if type(TargetAssistMod.GetTargetModel) == "function" then
 		origGetTargetModel = TargetAssistMod.GetTargetModel
-		TargetAssistMod.GetTargetModel = function(arg16, ...)
+		TargetAssistMod.GetTargetModel = function(self, ...)
 			if state.silentAim and state.equippedSpammer then
-				local r = (type(arg16) == "number" and arg16 > 0) and math.min(arg16, getEffectiveAimRange()) or getEffectiveAimRange()
-				local t = getNearestTarget(r)
+				local t = getNearestTarget(getEffectiveAimRange())
 				if t then return t end
 			end
-			return origGetTargetModel(arg16, ...)
+			return origGetTargetModel(self, ...)
 		end
 	end
 end
@@ -526,8 +527,10 @@ trackConn(UserInputService.InputBegan:Connect(function(input, gpe)
 end))
 
 local lastCastAck = {}
+local lastComboStep = {}
 trackConn(LocalPlayer.CharacterAdded:Connect(function()
 	table.clear(lastCastAck)
+	table.clear(lastComboStep)
 end))
 
 local function hasAbilityType(cfg, typeName)
@@ -569,12 +572,6 @@ local function tryOutspamStep()
 	end
 	local cfg = AbilityConfig and AbilityConfig[abName]
 	if hasAbilityType(cfg, "Hold") then return end
-	local stNow = workspace:GetServerTimeNow()
-	local inCombo = c:GetAttribute("InComboUntil")
-	local cueEnds = c:GetAttribute("ComboCueEnds")
-	if (type(inCombo) == "number" and inCombo > stNow) or (type(cueEnds) == "number" and cueEnds > stNow) then
-		return
-	end
 	if type(cfg) == "table" and tonumber(cfg.MagicRequirement) and cfg.MagicRequirement > 0 then
 		local cv = c:FindFirstChild("CharacterValues")
 		local mVal = cv and cv:FindFirstChild("Magic")
@@ -587,11 +584,24 @@ local function tryOutspamStep()
 		effRange = math.min(state.spamRange, cfg.Range)
 	end
 	local target = state.silentAim and getNearestTarget(effRange) or nil
-	if hasAbilityType(cfg, "Target") and not hasAbilityType(cfg, "Self") and not target then
+	local isCombo = type(cfg) == "table" and type(cfg.ComboSteps) == "table"
+	local stNow = workspace:GetServerTimeNow()
+	local inCombo = c:GetAttribute("InComboUntil")
+	local cueEnds = c:GetAttribute("ComboCueEnds")
+	local isComboActive = isCombo and ((type(inCombo) == "number" and inCombo > stNow) or (type(cueEnds) == "number" and cueEnds > stNow))
+	if hasAbilityType(cfg, "Target") and not hasAbilityType(cfg, "Self") and not target and not isComboActive then
 		return
+	end
+	if isCombo then
+		local mv = c:GetAttribute("MoveIndex") or 0
+		if isComboActive and lastComboStep[abName] == mv and lastCastAck[abName] and (now - lastCastAck[abName]) < 0.25 then
+			return
+		end
+		lastComboStep[abName] = mv
 	end
 	local minInterval = 1 / math.clamp(state.safeCps or 16, 2, 31)
 	if hasAbilityType(cfg, "PrepClick") and minInterval < 0.15 then minInterval = 0.15 end
+	if hasAbilityType(cfg, "Toggle") and minInterval < 0.35 then minInterval = 0.35 end
 	if lastCastAck[abName] and (now - lastCastAck[abName]) < minInterval then
 		return
 	end
@@ -1840,6 +1850,10 @@ task.spawn(function()
 					if d:IsA("GuiButton") and d.Visible and d.Active then
 						local nl = d.Name:lower()
 						local tl = (d:IsA("TextButton") and d.Text or ""):lower()
+						if tl == "" then
+							local subLbl = d:FindFirstChildWhichIsA("TextLabel", true)
+							if subLbl then tl = subLbl.Text:lower() end
+						end
 						if nl:find("play") or nl:find("spawn") or nl:find("deploy") or tl:find("play") or tl:find("spawn") or tl:find("deploy") then
 							lastSpawnAt = os.clock()
 							if type(getconnections) == "function" then
