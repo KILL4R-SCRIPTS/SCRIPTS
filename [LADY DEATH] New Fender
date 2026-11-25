@@ -178,16 +178,15 @@ local function safeTeleport(posOrCFrame)
 	hrp.AssemblyLinearVelocity = Vector3.zero
 	hrp.AssemblyAngularVelocity = Vector3.zero
 	c:PivotTo(targetCF)
-	local endPos = targetCF.Position
-	for _, delaySec in ipairs({ 0.10, 0.25, 0.45 }) do
-		task.delay(delaySec, function()
-			if hrp and hrp.Parent and (hrp.Position - endPos).Magnitude > 12 then
-				hrp.AssemblyLinearVelocity = Vector3.zero
-				hrp.AssemblyAngularVelocity = Vector3.zero
-				c:PivotTo(targetCF)
-			end
-		end)
-	end
+	task.delay(2.0, function()
+		local curC = LocalPlayer.Character
+		local curHrp = curC and getHRP(curC)
+		if curC and curHrp and curHrp.Parent then
+			curHrp.AssemblyLinearVelocity = Vector3.zero
+			curHrp.AssemblyAngularVelocity = Vector3.zero
+			curC:PivotTo(targetCF)
+		end
+	end)
 	return true
 end
 
@@ -1774,44 +1773,56 @@ toggle(bypassSec, "Auto Escape Bad Hair Day", state.autoEscapeBadHair, function(
 
 task.spawn(function()
 	local clearedHair = setmetatable({}, { __mode = "k" })
+	local lastHairClearAt = 0
 	while not _G.KayWareEOWStopped do
 		task.wait(0.08)
 		if state.autoEscapeBadHair then
 			local pg = LocalPlayer:FindFirstChild("PlayerGui")
 			local fraz = pg and pg:FindFirstChild("FrazzledFX")
 			if fraz then
-				local fakeInput = { UserInputType = Enum.UserInputType.MouseButton1 }
-				local brushedAny = false
+				local fakeMouse = { UserInputType = Enum.UserInputType.MouseButton1 }
+				local fakeTouch = { UserInputType = Enum.UserInputType.Touch }
+				local foundLock = false
 				for _, child in ipairs(fraz:GetChildren()) do
-					if child:IsA("ImageButton") and child.Name == "HairLock" and child.Active and not clearedHair[child] then
-						clearedHair[child] = true
-						brushedAny = true
-						local fired = false
-						if type(getconnections) == "function" then
-							local ok, conns = pcall(getconnections, child.InputBegan)
-							if ok and type(conns) == "table" and #conns > 0 then
-								for _, conn in ipairs(conns) do
-									if type(conn.Function) == "function" then
-										pcall(conn.Function, fakeInput)
-										fired = true
-									elseif conn.Fire then
-										pcall(function() conn:Fire(fakeInput) end)
-										fired = true
+					if child:IsA("ImageButton") and child.Name == "HairLock" then
+						foundLock = true
+						if child.Active and not clearedHair[child] then
+							clearedHair[child] = true
+							if type(getconnections) == "function" then
+								local ok, conns = pcall(getconnections, child.InputBegan)
+								if ok and type(conns) == "table" then
+									for _, conn in ipairs(conns) do
+										if type(conn.Function) == "function" then
+											pcall(conn.Function, fakeTouch)
+											pcall(conn.Function, fakeMouse)
+										elseif conn.Fire then
+											pcall(function() conn:Fire(fakeTouch) end)
+											pcall(function() conn:Fire(fakeMouse) end)
+										end
 									end
 								end
 							end
-						end
-						if not fired and type(firesignal) == "function" then
-							pcall(firesignal, child.InputBegan, fakeInput)
+							if type(firesignal) == "function" then
+								pcall(firesignal, child.InputBegan, fakeTouch)
+								pcall(firesignal, child.InputBegan, fakeMouse)
+							end
 						end
 					end
 				end
-				if brushedAny then
+				if foundLock and (os.clock() - lastHairClearAt) >= 0.4 then
+					lastHairClearAt = os.clock()
+					local rs = game:GetService("ReplicatedStorage")
+					local ev = rs:FindFirstChild("Events_.")
+					local bh = ev and ev:FindFirstChild("BadHairFX")
+					if bh then pcall(function() bh:FireServer("Cleared") end) end
 					task.delay(0.15, function()
-						local rs = game:GetService("ReplicatedStorage")
-						local ev = rs:FindFirstChild("Events_.")
-						local bh = ev and ev:FindFirstChild("BadHairFX")
-						if bh then pcall(function() bh:FireServer("Cleared") end) end
+						if fraz and fraz.Parent then
+							for _, child in ipairs(fraz:GetChildren()) do
+								if child.Name == "HairLock" or child.Name == "FrazzleTint" then
+									pcall(function() child:Destroy() end)
+								end
+							end
+						end
 					end)
 				end
 			end
